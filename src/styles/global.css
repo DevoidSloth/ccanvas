@@ -36,6 +36,18 @@
   --k-web: #6db5a8;
   --k-note: #d8a657;
 
+  /* filetype icon tints (file tree) — muted to sit quietly in the tree */
+  --ft-folder: #d8a657;
+  --ft-code: #7ea8d8;
+  --ft-markup: #6db5a8;
+  --ft-data: #a3c585;
+  --ft-image: #c79bd8;
+  --ft-doc: #b9b6ae;
+  --ft-config: #c9a26d;
+  --ft-archive: #cd9b6a;
+  --ft-db: #6db5a8;
+  --ft-file: #6f6e68;
+
   /* grid */
   --grid-dot: rgba(233, 230, 225, 0.05);
   --grid-dot-strong: rgba(233, 230, 225, 0.09);
@@ -1772,6 +1784,55 @@ textarea {
 .ftree__root {
   flex: 1;
 }
+.ftree__root svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ft-folder);
+  flex-shrink: 0;
+}
+/* search box */
+.ftree__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+  color: var(--ink-faint);
+  flex-shrink: 0;
+}
+.ftree__search > svg {
+  flex-shrink: 0;
+}
+.ftree__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 0;
+}
+.ftree__input::placeholder {
+  color: var(--ink-faint);
+}
+.ftree__clear {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--ink-faint);
+}
+.ftree__clear:hover {
+  color: var(--ink);
+  background: var(--panel-hi);
+}
 .ftree__list {
   flex: 1;
   overflow: auto;
@@ -1797,12 +1858,60 @@ textarea {
   color: var(--ink-faint);
   flex-shrink: 0;
   text-align: center;
+  font-size: 10px;
 }
-.ftree__caret--file {
-  color: var(--ink-ghost);
+/* filetype icon */
+.ftree__icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ft-file);
+  opacity: 0.92;
+}
+.ftree__icon svg {
+  width: 14px;
+  height: 14px;
+}
+.ftree__icon--folder { color: var(--ft-folder); }
+.ftree__icon--code { color: var(--ft-code); }
+.ftree__icon--markup { color: var(--ft-markup); }
+.ftree__icon--data { color: var(--ft-data); }
+.ftree__icon--image { color: var(--ft-image); }
+.ftree__icon--doc { color: var(--ft-doc); }
+.ftree__icon--config { color: var(--ft-config); }
+.ftree__icon--archive { color: var(--ft-archive); }
+.ftree__icon--db { color: var(--ft-db); }
+.ftree__icon--file { color: var(--ft-file); }
+.ftree__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ftree__name--dir {
-  color: var(--k-note);
+  color: var(--ink);
+}
+/* search results */
+.ftree__result {
+  padding-left: 10px;
+}
+.ftree__hl {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-radius: 2px;
+}
+.ftree__path {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
 }
 .ftree__hint {
   font-family: var(--font-mono);
@@ -1879,20 +1988,40 @@ textarea {
 .editor__state--saved { color: #8bbf73; }
 .editor__state--saving { color: var(--ink-faint); }
 .editor__state--error { color: #e8795a; }
-.editor__text {
+/* Monaco editing surface. The stage is a positioning context so the editor
+   fills it and overlays (loading / read-error) can sit on top. */
+.editor__stage {
+  position: relative;
   flex: 1;
-  width: 100%;
+  min-height: 0;
   background: var(--bg);
-  border: none;
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  padding: 10px 12px;
-  resize: none;
-  outline: none;
+}
+.editor__host {
+  position: absolute;
+  inset: 0;
   user-select: text;
-  tab-size: 2;
+}
+.editor__overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 18px;
+  background: var(--bg);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+}
+/* a soft overlay is just a hint — let clicks reach the editor underneath */
+.editor__overlay--soft {
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  pointer-events: none;
+}
+.editor__overlay code {
+  color: var(--ink-dim);
 }
 .editor__pick {
   flex: 1;
@@ -2139,6 +2268,18 @@ textarea {
 }
 .selbar__flow-prompt:focus {
   border-color: var(--accent);
+}
+.selbar__flow-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+  line-height: 1.4;
+}
+.selbar__flow-hint code {
+  color: var(--ink-dim);
+  background: var(--bg);
+  padding: 0 3px;
+  border-radius: 3px;
 }
 
 /* ============================================================

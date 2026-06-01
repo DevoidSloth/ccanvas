@@ -354,6 +354,15 @@ export const IconChecks = (p: P) => (
   </S>
 )
 
+// A 3D box — archive/package files (zip, tar, …).
+export const IconArchive = (p: P) => (
+  <S {...p}>
+    <path d="M4 7.5l8-3.7 8 3.7v9L12 20.2l-8-3.7v-9z" />
+    <path d="M4 7.5l8 3.7 8-3.7M12 11.2v9" />
+    <path d="M8 5.6l8 3.7" />
+  </S>
+)
+
 // Stacked-disk database cylinder — the SQL editor widget.
 export const IconDatabase = (p: P) => (
   <S {...p}>

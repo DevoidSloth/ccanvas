@@ -259,7 +259,7 @@ export function SelectionBar() {
 
               <textarea
                 className="selbar__flow-prompt"
-                placeholder={`prompt sent to ${toTitle} (then Enter) when this fires…`}
+                placeholder={`prompt for ${toTitle} — leave empty to pipe ${fromTitle}'s output, or embed it with {{output}}`}
                 defaultValue={flow.prompt ?? ''}
                 rows={2}
                 spellCheck={false}
@@ -267,6 +267,9 @@ export function SelectionBar() {
                 onKeyDown={(e) => e.stopPropagation()}
                 onChange={(e) => patchFlow({ prompt: e.target.value || undefined })}
               />
+              <div className="selbar__flow-hint">
+                empty → pipes {fromTitle}'s output · <code>{'{{output}}'}</code> inserts it into your prompt
+              </div>
 
               <div className="selbar__flow-row">
                 <span className="selbar__flow-tag" title="When the target has several incoming edges">

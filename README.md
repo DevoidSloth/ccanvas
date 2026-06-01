@@ -72,8 +72,13 @@ diagram of agents becomes a runnable pipeline. Select the connector and hit
   (keyword match on the source agent's last output) · `on match` (your regex).
   For a reliable signal, tell the agent to end with a sentinel and match it,
   e.g. `on match` + `STATUS:\s*OK`.
-- **prompt** — the text handed to the target agent (and submitted) when the edge
-  fires. Multi-line prompts are pasted intact.
+- **prompt / pipe** — the text handed to the target agent (and submitted) when
+  the edge fires. **Leave it empty to pipe the source agent's output straight
+  into the target**, or embed that output inside a prompt with `{{output}}`
+  (e.g. `Review this and fix any bugs:\n\n{{output}}`). Multi-line text is pasted
+  intact. The piped output is the model's **actual last message**, read from the
+  Claude Code session transcript (`~/.claude/projects/…/<session>.jsonl`); if
+  that file isn't reachable it falls back to scraping the terminal.
 - **join** — when a target has several incoming edges: `all` waits for every
   source to finish (AND — *"after these agents run, run this one"*), `any` fires
   on the first (OR).

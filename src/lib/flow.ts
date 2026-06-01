@@ -10,6 +10,7 @@
 import type { ArrowElement, CanvasElement, WidgetElement, Workspace } from './types'
 import { useStore } from '../store/workspace'
 import { sendTo, isLive, stripAnsi, notify } from './agents'
+import { defaultDir, readFile, joinPath } from './backend'
 
 // Heuristic keyword sets for the success/failure conditions. An agent that
 // needs a reliable signal should instead be told to end with a sentinel and
@@ -19,9 +20,114 @@ const SUCCESS_RE =
 const FAILURE_RE =
   /\b(fail(ed|ure|s)?|errored?|exception|✗|✘|cannot|could ?n'?t|denied|aborted|rejected|blocked)\b/i
 
-/** Look only at the agent's most recent output, not the whole scrollback. */
+/**
+ * Text the success/failure/match conditions run against. Uses the cleaned
+ * output (TUI input-box chrome stripped) so a finished agent's concluding
+ * words aren't pushed out of view by the prompt box; trailing slice keeps it
+ * to roughly the last turn.
+ */
 function lastTurnText(tail: string): string {
-  return stripAnsi(tail).slice(-1200)
+  return cleanAgentOutput(tail).slice(-1500)
+}
+
+// Placeholder in an edge prompt that gets replaced with the source agent's
+// piped output. (Aliases for convenience.)
+const OUTPUT_TOKEN = /\{\{\s*(output|out|result|prev|previous)\s*\}\}/gi
+
+/**
+ * Best-effort extraction of an agent's recent output for piping into the next
+ * agent: strip ANSI, drop Claude's TUI input-box chrome and hint lines, collapse
+ * blank runs, and keep the trailing slice. It's terminal scraping, so it's
+ * approximate — wrap it with instructions via {{output}} when precision matters.
+ */
+export function cleanAgentOutput(tail: string): string {
+  const lines = stripAnsi(tail).split('\n')
+  const kept: string[] = []
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '')
+    if (/[╭╮╰╯│─┌┐└┘├┤┬┴┼]/.test(line)) continue // input-box frame
+    if (/^\s*[>❯]\s*$/.test(line)) continue // empty prompt marker
+    if (/\?\s*for shortcuts/i.test(line)) continue
+    if (/^\s*(esc to interrupt|ctrl\+[a-z]|shift\+|tab to|⏎)/i.test(line)) continue
+    kept.push(line)
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(-6000)
+}
+
+// ---------- session transcript (the model's actual last message) ----------
+// Claude Code persists each session as JSONL under
+//   <home>/.claude/projects/<cwd-with-non-alnum-→-dashes>/<sessionId>.jsonl
+// Reading it gives the model's real assistant output, free of terminal chrome.
+
+let homeDir: string | null | undefined // cached after first lookup
+
+/** Encode a working directory the way Claude Code names its project folder. */
+function encodeProject(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+/**
+ * The text of the source agent's most recent assistant turn, pulled from its
+ * session transcript: every assistant text block since the last user/tool event.
+ * Returns null if the transcript can't be read (no backend, unknown path, etc.).
+ */
+async function readLastAssistant(source: WidgetElement): Promise<string | null> {
+  if (!source.sessionId || !source.cwd) return null
+  if (homeDir === undefined) homeDir = await defaultDir()
+  if (!homeDir) return null
+  const path = joinPath(
+    joinPath(joinPath(joinPath(homeDir, '.claude'), 'projects'), encodeProject(source.cwd)),
+    `${source.sessionId}.jsonl`,
+  )
+  const content = await readFile(path)
+  if (!content) return null
+  return extractLastAssistant(content)
+}
+
+/** Walk a transcript from the end, gathering the final turn's assistant text. */
+export function extractLastAssistant(jsonl: string): string | null {
+  const lines = jsonl.split('\n')
+  const parts: string[] = []
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const ln = lines[i].trim()
+    if (!ln) continue
+    let ev: { type?: string; message?: { content?: unknown } }
+    try {
+      ev = JSON.parse(ln)
+    } catch {
+      continue
+    }
+    // a user message or tool result marks the start of this turn — stop
+    if (ev.type === 'user') break
+    if (ev.type !== 'assistant') continue
+    const content = ev.message?.content
+    let text = ''
+    if (typeof content === 'string') text = content
+    else if (Array.isArray(content))
+      text = content
+        .filter((c): c is { type: string; text: string } => !!c && c.type === 'text')
+        .map((c) => c.text)
+        .join('\n')
+    if (text.trim()) parts.unshift(text.trim())
+  }
+  const out = parts.join('\n\n').trim()
+  return out || null
+}
+
+/** True if an edge's resolved text would embed the source's output. */
+function wantsOutput(edge: ArrowElement): boolean {
+  const p = edge.flow?.prompt?.trim() ?? ''
+  if (!p) return true
+  OUTPUT_TOKEN.lastIndex = 0
+  const r = OUTPUT_TOKEN.test(p)
+  OUTPUT_TOKEN.lastIndex = 0
+  return r
+}
+
+/** Capture the source's output to pipe: real transcript message, else scrape. */
+async function captureOutput(source: WidgetElement, tail: string): Promise<string> {
+  const fromTranscript = await readLastAssistant(source)
+  return fromTranscript ?? cleanAgentOutput(tail)
 }
 
 function safeRegex(src: string): RegExp | null {
@@ -61,9 +167,10 @@ export function evaluateCondition(arrow: ArrowElement, tail: string): boolean {
 // An edge fires at most once per source-turn — remember the source turn index
 // it last fired on so a single completion can't re-trigger it.
 const lastFiredTurn = new Map<string, number>()
-// Incoming edges that have been satisfied for a target but not yet consumed by
-// a fire. Keyed by target widget id → set of arrow ids.
-const satisfied = new Map<string, Set<string>>()
+// Incoming edges satisfied for a target but not yet consumed by a fire. Keyed
+// by target widget id → (arrow id → the source agent's piped output captured
+// when that edge was satisfied).
+const satisfied = new Map<string, Map<string, string>>()
 
 // Runaway guard: if flows fire faster than this within the window, pause them
 // and tell the user, so a cyclic graph can't spam agents forever.
@@ -142,22 +249,44 @@ function deliver(targetId: string, prompt: string, title: string, tries = 0) {
   setTimeout(() => deliver(targetId, prompt, title, tries + 1), 1300)
 }
 
-/** Fire a target: build the combined prompt from its satisfied edges, deliver. */
-function fireTarget(ws: Workspace, targetId: string, satisfiedEdges: ArrowElement[]) {
+/**
+ * The text one edge contributes to its target, resolving output piping:
+ *  • prompt with {{output}} → placeholder replaced by the source's output
+ *  • empty prompt           → the source's output itself (pure pipe)
+ *  • plain prompt           → the prompt as written (no pipe)
+ */
+function edgeText(edge: ArrowElement, output: string): string {
+  const p = edge.flow?.prompt?.trim() ?? ''
+  if (!p) return output
+  if (OUTPUT_TOKEN.test(p)) {
+    OUTPUT_TOKEN.lastIndex = 0 // reset the global regex after .test()
+    return p.replace(OUTPUT_TOKEN, output)
+  }
+  return p
+}
+
+/** Fire a target: build its prompt from the satisfied edges (piping), deliver. */
+function fireTarget(
+  ws: Workspace,
+  targetId: string,
+  satisfiedEdges: ArrowElement[],
+  outputs: Map<string, string>,
+) {
   if (!allowFire()) return
   const target = ws.elements.find((e) => e.id === targetId)
   const title = (target && 'title' in target && target.title) || 'agent'
-  // combine prompts from the contributing edges in stacking order
+  // combine each contributing edge's resolved text, in stacking order
   const prompt = satisfiedEdges
     .slice()
     .sort((a, b) => a.z - b.z)
-    .map((e) => e.flow?.prompt?.trim())
+    .map((e) => edgeText(e, outputs.get(e.id) ?? ''))
+    .map((s) => s.trim())
     .filter(Boolean)
-    .join('\n')
+    .join('\n\n')
   // re-arm: consume the satisfied set so the next run needs fresh completions
   satisfied.delete(targetId)
   if (!prompt) {
-    notify('ccanvas flow', `${title} triggered, but no prompt is set on the edge.`)
+    notify('ccanvas flow', `${title} triggered, but there was no output or prompt to send.`)
     return
   }
   deliver(targetId, prompt, title)
@@ -170,13 +299,21 @@ function fireTarget(ws: Workspace, targetId: string, satisfiedEdges: ArrowElemen
  * `turnIndex` is the agent's monotonic turn counter (for per-turn dedupe);
  * `tail` is its recent terminal output.
  */
-export function onAgentTurnComplete(sourceId: string, turnIndex: number, tail: string) {
+export async function onAgentTurnComplete(sourceId: string, turnIndex: number, tail: string) {
   if (!useStore.getState().flowsEnabled) return
   const ws = tabContaining(sourceId)
   if (!ws) return
 
   const outgoing = flowEdges(ws, { from: sourceId })
   if (!outgoing.length) return
+
+  // this agent's output (the model's last message), captured once to pipe into
+  // any edge that fires — only fetched when some edge actually needs it
+  const sourceEl = ws.elements.find((e) => e.id === sourceId)
+  const output =
+    sourceEl && sourceEl.type === 'widget' && outgoing.some(wantsOutput)
+      ? await captureOutput(sourceEl, tail)
+      : ''
 
   const touchedTargets = new Set<string>()
   for (const edge of outgoing) {
@@ -185,8 +322,8 @@ export function onAgentTurnComplete(sourceId: string, turnIndex: number, tail: s
     lastFiredTurn.set(edge.id, turnIndex)
     const targetId = edge.to!.id
     let set = satisfied.get(targetId)
-    if (!set) satisfied.set(targetId, (set = new Set()))
-    set.add(edge.id)
+    if (!set) satisfied.set(targetId, (set = new Map()))
+    set.set(edge.id, output)
     touchedTargets.add(targetId)
   }
 
@@ -200,6 +337,6 @@ export function onAgentTurnComplete(sourceId: string, turnIndex: number, tail: s
     const anyFires = satEdges.some((e) => e.flow?.join === 'any')
     // AND (default): every incoming edge must be satisfied
     const allFire = incoming.every((e) => sat.has(e.id))
-    if (anyFires || allFire) fireTarget(ws, targetId, satEdges)
+    if (anyFires || allFire) fireTarget(ws, targetId, satEdges, sat)
   }
 }

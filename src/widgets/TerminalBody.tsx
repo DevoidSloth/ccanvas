@@ -6,7 +6,8 @@ import type { WidgetElement } from '../lib/types'
 import { claudeColorName } from '../lib/types'
 import { connectPty, type Term } from '../lib/terminal'
 import { useStore, selectActive } from '../store/workspace'
-import { clamp } from '../lib/geometry'
+import { findFilePaths, widgetKindForFile } from '../lib/filetypes'
+import { resolvePath, baseName } from '../lib/backend'
 import {
   useAgents,
   registerTransport,
@@ -47,12 +48,15 @@ export function TerminalBody({
   const lineRef = useRef('')
   const localStartedRef = useRef(false)
   const kRef = useRef(1)
+  // cascade offset so repeatedly opening files from the output don't stack
+  const openCountRef = useRef(0)
   const [status, setStatus] = useState<Mode>('connecting')
   const [attempt, setAttempt] = useState(0)
-  // supersample factor (1 at ≤100% zoom; grows with zoom-in for crisp text)
+  // supersample factor (1 at ≤100% zoom; grows with zoom-in for crisp text).
+  // Tracks the live zoom EXACTLY so the inner `scale(1/k)` cancels the world's
+  // `scale(zoom)` — see the zoom-tracking effect for why selection needs k===zoom.
   const [k, setK] = useState(() => {
-    const z = selectActive(useStore.getState()).camera.zoom
-    const b = clamp(Math.round(clamp(z, 1, 3) * 2) / 2, 1, 3)
+    const b = Math.max(1, selectActive(useStore.getState()).camera.zoom)
     kRef.current = b
     return b
   })
@@ -129,6 +133,68 @@ export function TerminalBody({
     term.open(innerRef.current)
     termRef.current = term
     fitRef.current = fit
+
+    // ---- clickable filenames ----
+    // Underline any openable file path in the output and, on click, open it in
+    // the widget that fits its type: a data viewer (csv/parquet/…), a figure
+    // viewer (png/svg/…), or the plain-text editor. The live element is read at
+    // click time so a moved terminal still spawns the viewer beside itself.
+    const openFileFromTerminal = (rawPath: string) => {
+      const store = useStore.getState()
+      const ws = store.active()
+      if (!ws) return
+      const self =
+        (ws.elements.find((e) => e.id === el.id) as WidgetElement | undefined) ?? el
+      const kind = widgetKindForFile(rawPath)
+      const abs = resolvePath(self.cwd, rawPath)
+      // focus an already-open viewer for this exact file rather than duplicate it
+      const existing = ws.elements.find(
+        (e): e is WidgetElement =>
+          e.type === 'widget' &&
+          e.kind === kind &&
+          !!e.path &&
+          resolvePath(e.cwd, e.path) === abs,
+      )
+      if (existing) {
+        store.setSelection([existing.id])
+        store.bringToFront([existing.id])
+        store.setActiveWidget(existing.id)
+        return
+      }
+      const n = openCountRef.current++
+      store.spawnWidget(
+        kind,
+        self.x + self.w + 320 + (n % 5) * 30,
+        self.y + 140 + (n % 5) * 30,
+        { path: rawPath, cwd: self.cwd, title: baseName(rawPath) },
+      )
+    }
+
+    const linkProvider = term.registerLinkProvider({
+      provideLinks(bufferLineNumber, callback) {
+        const bufLine = term.buffer.active.getLine(bufferLineNumber - 1)
+        if (!bufLine) {
+          callback(undefined)
+          return
+        }
+        const matches = findFilePaths(bufLine.translateToString(true))
+        if (!matches.length) {
+          callback(undefined)
+          return
+        }
+        callback(
+          matches.map((mt) => ({
+            text: mt.path,
+            // ranges are 1-based; end.x is the last cell of the link (inclusive)
+            range: {
+              start: { x: mt.index + 1, y: bufferLineNumber },
+              end: { x: mt.index + mt.length, y: bufferLineNumber },
+            },
+            activate: () => openFileFromTerminal(mt.path),
+          })),
+        )
+      },
+    })
 
     // standard terminal copy/paste keys: Cmd+C/V on macOS, Ctrl+Shift+C/V
     // elsewhere. Plain Ctrl+C is left alone so it still sends SIGINT.
@@ -256,6 +322,7 @@ export function TerminalBody({
 
     return () => {
       onData.dispose()
+      linkProvider.dispose()
       ro.disconnect()
       term.dispose()
       termRef.current = null
@@ -388,12 +455,14 @@ export function TerminalBody({
     }
 
     // ---- activity status: streaming → working; quiet → idle/waiting ----
+    // keep a generous rolling buffer: status/cost detection only need the end,
+    // but flow piping forwards this agent's last output to the next agent
     let tail = ''
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let wasWorking = false
     let workingSince: number | null = null
     const onActivity = (text: string) => {
-      tail = (tail + text).slice(-2000)
+      tail = (tail + text).slice(-12000)
       if (resumeWatch && !recovered) {
         const recent = stripAnsi(tail).slice(-400)
         if (FAIL_INUSE.test(recent)) recoverSession('inuse')
@@ -431,7 +500,7 @@ export function TerminalBody({
           if (ready && launchTasks.length === 0) {
             if (flowArmTurn === null) flowArmTurn = turns
             else if (!waiting && turns > flowArmTurn)
-              onAgentTurnComplete(el.id, turns, tail)
+              void onAgentTurnComplete(el.id, turns, tail)
           }
         }
         onSettle()
@@ -530,14 +599,22 @@ export function TerminalBody({
     if (active) termRef.current?.focus()
   }, [active])
 
-  // track the canvas zoom (bucketed) without re-rendering on every frame; the
-  // apply-effect below resizes the xterm to the new supersample factor
+  // Match the supersample factor to the live zoom (debounced so the font only
+  // re-measures once the gesture settles, not every frame). xterm maps a click
+  // to a cell by dividing the pointer offset from `getBoundingClientRect()` —
+  // which is post-transform / visual — by the UN-scaled css cell size. That's
+  // only correct when the terminal's net on-screen scale is 1, i.e. when the
+  // inner `scale(1/k)` exactly cancels the world's `scale(zoom)` → k === zoom.
+  // The old code bucketed k to the nearest 0.5 (and capped it at 3), so k≠zoom
+  // almost always and the selection highlight drifted a line or two below the
+  // cursor on zoom-in. Track zoom exactly; floor at 1 (don't shrink below the
+  // base font — keeps ≤100% behaviour and avoids flaky tiny-font measurement).
   useEffect(() => {
-    const bucket = (z: number) => clamp(Math.round(clamp(z, 1, 3) * 2) / 2, 1, 3)
     let t: ReturnType<typeof setTimeout> | null = null
     const unsub = useStore.subscribe((s) => {
-      const nk = bucket(selectActive(s).camera.zoom)
-      if (nk === kRef.current) return
+      const nk = Math.max(1, selectActive(s).camera.zoom)
+      // ignore sub-percent drift so unrelated state churn doesn't re-measure
+      if (Math.abs(nk - kRef.current) < 0.01) return
       if (t) clearTimeout(t)
       t = setTimeout(() => {
         kRef.current = nk

@@ -12,6 +12,7 @@ import {
   type DirEntry,
 } from '../lib/backend'
 import { IconReload, IconExternal, IconPlot } from '../ui/icons'
+import { IMAGE_EXTENSIONS, PLOT_EXTENSIONS } from '../lib/filetypes'
 
 // Live figure viewer. Point it at an image file (png/svg/jpg/…) and it shows
 // that figure, live-reloading whenever the file is rewritten — the natural fit
@@ -19,10 +20,6 @@ import { IconReload, IconExternal, IconPlot } from '../ui/icons'
 // Point it at a folder instead and it lists the figures inside, newest first,
 // auto-following the most recent unless you pick one. Zoom with the wheel, pan
 // by dragging, double-click to reset.
-
-export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif']
-/** Extensions the plot widget claims for routing/file dialogs (images + pdf). */
-export const PLOT_EXTENSIONS = [...IMAGE_EXTENSIONS, 'pdf']
 
 const MIME: Record<string, string> = {
   png: 'image/png',
