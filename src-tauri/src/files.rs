@@ -71,6 +71,8 @@ pub struct DirEntry {
     name: String,
     path: String,
     is_dir: bool,
+    /// last-modified time in ms since the unix epoch (None if unavailable)
+    mtime: Option<u64>,
 }
 
 /// List a directory's immediate children (dirs first, then files, A→Z).
@@ -82,10 +84,17 @@ pub fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
         .filter_map(|r| r.ok())
         .map(|e| {
             let p = e.path();
+            let meta = e.metadata().ok();
+            let mtime = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64);
             DirEntry {
                 name: e.file_name().to_string_lossy().to_string(),
                 path: p.to_string_lossy().to_string(),
-                is_dir: p.is_dir(),
+                is_dir: meta.as_ref().map(|m| m.is_dir()).unwrap_or_else(|| p.is_dir()),
+                mtime,
             }
         })
         .collect();
@@ -133,6 +142,16 @@ pub fn run_command(
 #[tauri::command]
 pub fn read_text(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Read a file's raw bytes, base64-encoded for transport over the IPC bridge.
+/// Used by the data widget (parquet/hdf5) and plot widget (images) which need
+/// binary content that `read_text` can't carry.
+#[tauri::command]
+pub fn read_bytes(path: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 #[tauri::command]

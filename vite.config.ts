@@ -14,4 +14,7 @@ export default defineConfig({
     watch: { ignored: ['**/src-tauri/**'] },
   },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
+  // h5wasm ships a wasm binary + emscripten glue that esbuild's dep pre-bundler
+  // chokes on; exclude it so it's loaded as-is by the (lazy) dynamic import.
+  optimizeDeps: { exclude: ['h5wasm'] },
 })

@@ -20,6 +20,9 @@ import {
   IconRun,
   IconIssue,
   IconChecks,
+  IconDatabase,
+  IconData,
+  IconPlot,
 } from '../ui/icons'
 import { useAgents, sendTo, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
 import { NoteBody } from './NoteBody'
@@ -34,6 +37,9 @@ import { PrBody } from './PrBody'
 import { IssuesBody } from './IssuesBody'
 import { RunsBody } from './RunsBody'
 import { RunnerBody } from './RunnerBody'
+import { SqlBody } from './SqlBody'
+import { DataBody } from './DataBody'
+import { PlotBody } from './PlotBody'
 
 const KIND_ICON: Record<WidgetKind, (p: { className?: string; size?: number }) => JSX.Element> = {
   terminal: IconTerminal,
@@ -49,6 +55,9 @@ const KIND_ICON: Record<WidgetKind, (p: { className?: string; size?: number }) =
   issues: IconIssue,
   runs: IconChecks,
   runner: IconRun,
+  sql: IconDatabase,
+  data: IconData,
+  plot: IconPlot,
 }
 
 const MIN_W = 220
@@ -92,7 +101,10 @@ export function WidgetFrame({
     el.kind === 'pr' ||
     el.kind === 'issues' ||
     el.kind === 'runs' ||
-    el.kind === 'runner'
+    el.kind === 'runner' ||
+    el.kind === 'sql' ||
+    el.kind === 'data' ||
+    el.kind === 'plot'
   // notes are also single-click, but manage their own pointer handling
   // (toggle a checkbox vs. enter edit) so they don't use the generic capture
   const isNote = el.kind === 'note'
@@ -117,9 +129,18 @@ export function WidgetFrame({
     bringToFront([el.id])
   }
 
+  // Start a move. If this widget is already part of a (multi) selection, keep
+  // that selection so everything drags together; shift toggles membership;
+  // otherwise select just this one. Mirrors the canvas vector-drag behaviour.
   const grab = (e: React.PointerEvent) => {
     e.stopPropagation()
-    select()
+    const cur = useStore.getState().selection
+    if (e.shiftKey) {
+      setSelection(cur.includes(el.id) ? cur.filter((x) => x !== el.id) : [...cur, el.id])
+    } else if (!cur.includes(el.id)) {
+      setSelection([el.id])
+    }
+    bringToFront([el.id])
     onStartMove(e, el.id)
   }
 
@@ -344,6 +365,9 @@ export function WidgetFrame({
         {el.kind === 'issues' && <IssuesBody el={el} />}
         {el.kind === 'runs' && <RunsBody el={el} />}
         {el.kind === 'runner' && <RunnerBody el={el} />}
+        {el.kind === 'sql' && <SqlBody el={el} active={active} />}
+        {el.kind === 'data' && <DataBody el={el} />}
+        {el.kind === 'plot' && <PlotBody el={el} />}
 
         {shielded && (
           <div

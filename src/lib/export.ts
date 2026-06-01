@@ -4,7 +4,7 @@
 
 import type { CanvasElement, Workspace } from './types'
 import { WIDGET_ACCENT } from './types'
-import { boundsOfMany, resolvedArrow } from './geometry'
+import { boundsOfMany, resolvedArrow, arrowControl } from './geometry'
 
 function esc(s: string): string {
   return s
@@ -16,13 +16,18 @@ function esc(s: string): string {
 
 function arrowSvg(a: CanvasElement & { type: 'arrow' }): string {
   const { x1, y1, x2, y2, color, size } = a
-  const angle = Math.atan2(y2 - y1, x2 - x1)
   const len = Math.hypot(x2 - x1, y2 - y1)
   const head = Math.min(16 + size * 2, len * 0.4)
+  const c = arrowControl({ x: x1, y: y1 }, { x: x2, y: y2 }, a.bend)
+  const angle = a.bend ? Math.atan2(y2 - c.y, x2 - c.x) : Math.atan2(y2 - y1, x2 - x1)
   const a1 = angle - Math.PI / 7
   const a2 = angle + Math.PI / 7
+  const dash = a.dashed ? ` stroke-dasharray="${size * 3} ${size * 2.5}"` : ''
+  const shaft = a.bend
+    ? `<path d="M ${x1} ${y1} Q ${c.x} ${c.y} ${x2} ${y2}" fill="none" stroke="${color}" stroke-width="${size}" stroke-linecap="round"${dash}/>`
+    : `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${size}" stroke-linecap="round"${dash}/>`
   return (
-    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${size}" stroke-linecap="round"/>` +
+    shaft +
     `<path d="M ${x2 - head * Math.cos(a1)} ${y2 - head * Math.sin(a1)} L ${x2} ${y2} L ${x2 - head * Math.cos(a2)} ${y2 - head * Math.sin(a2)}" fill="none" stroke="${color}" stroke-width="${size}" stroke-linecap="round" stroke-linejoin="round"/>`
   )
 }

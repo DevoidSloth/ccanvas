@@ -158,7 +158,43 @@ export async function readFile(path: string): Promise<string | null> {
   }
 }
 
-export type DirEntry = { name: string; path: string; is_dir: boolean }
+export type DirEntry = {
+  name: string
+  path: string
+  is_dir: boolean
+  /** last-modified time in ms since epoch (may be absent on older backends) */
+  mtime?: number | null
+}
+
+/** Decode a standard-base64 string to bytes (used by readBytes). */
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+/**
+ * Read a file's raw bytes. Carried as base64 over both backends (Tauri IPC and
+ * the HTTP bridge) and decoded here. null when no backend is available or the
+ * read fails — callers should degrade gracefully. Used for binary formats the
+ * text reader can't handle (parquet, hdf5, images).
+ */
+export async function readBytes(path: string): Promise<Uint8Array | null> {
+  if (isTauri()) {
+    try {
+      return b64ToBytes(await invoke<string>('read_bytes', { path }))
+    } catch {
+      return null
+    }
+  }
+  try {
+    const { b64 } = await httpGet<{ b64: string }>(`/read-bytes?path=${encodeURIComponent(path)}`)
+    return b64ToBytes(b64)
+  } catch {
+    return null
+  }
+}
 
 /** List a directory's immediate children (dirs first). null if unavailable. */
 export async function listDir(path: string): Promise<DirEntry[] | null> {

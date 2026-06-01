@@ -17,6 +17,7 @@ import {
   ensureNotifyPermission,
   notify,
 } from '../lib/agents'
+import { onAgentTurnComplete } from '../lib/flow'
 
 type Mode = 'connecting' | 'pty' | 'local'
 
@@ -303,6 +304,11 @@ export function TerminalBody({
     const launchTasks: { data: string; enter: boolean }[] = []
     let taskFallback: ReturnType<typeof setTimeout> | null = null
     let readyFallback: ReturnType<typeof setTimeout> | null = null
+    // flow orchestration arms only once Claude is up and its launch sequence
+    // (colour + initial prompt) has drained — so boot churn and the typed-but-
+    // unsubmitted first prompt never masquerade as a completed turn. Holds the
+    // turn index at arm time; only later turns can fire outgoing flow edges.
+    let flowArmTurn: number | null = null
 
     // mark the session resumable — only once Claude is actually up, so a
     // reload never tries to resume a session that never really started
@@ -418,13 +424,22 @@ export function TerminalBody({
           workingSince = null
           const c = scrapeCost(tail)
           if (c != null) useAgents.getState().setCost(el.id, c)
+          // orchestration: fire outgoing flow arrows on a genuine completion.
+          // Only once ready + launch queue drained (so boot/launch settles are
+          // ignored), and only for turns after the arming settle.
+          const turns = useAgents.getState().metrics[el.id]?.turns ?? 0
+          if (ready && launchTasks.length === 0) {
+            if (flowArmTurn === null) flowArmTurn = turns
+            else if (!waiting && turns > flowArmTurn)
+              onAgentTurnComplete(el.id, turns, tail)
+          }
         }
         onSettle()
       }, 700)
     }
 
     connectPty(
-      { cols: term.cols, rows: term.rows, cwd: el.cwd || undefined, launch },
+      { id: el.id, cols: term.cols, rows: term.rows, cwd: el.cwd || undefined, launch },
       {
         onData: (chunk) => {
           term.write(chunk as string | Uint8Array)
@@ -463,22 +478,31 @@ export function TerminalBody({
           /* noop */
         }
         t.start()
-        // queue colour + first prompt to push once Claude's UI is up (the name
-        // is set via the --name launch flag, so it needs no timing). These fire
-        // when Claude is detected ready (see onSettle), never on a fixed delay.
+        // A re-attach (the shell survived a webview reload) already has claude
+        // running — start() replays its scrollback to restore the view, so we
+        // must NOT relaunch or it'd stack a second claude. The activity watchers
+        // below still run, so status/flows pick back up from the live output.
         if (isAgent) {
-          const cn = claudeColorName(el.color)
-          if (el.color && cn !== 'default')
-            launchTasks.push({ data: `/color ${cn}`, enter: true })
-          // first launch only: the initial prompt (no \r so you can review it)
-          if (!el.agentStarted && el.agentPrompt)
-            launchTasks.push({ data: el.agentPrompt, enter: false })
-          // safety net: if Claude's UI never appears, still become ready so the
-          // session is marked resumable and the queue isn't stranded
+          // launch sequence runs only on a fresh spawn — a re-attach already has
+          // claude running. Queue colour + first prompt to push once Claude's UI
+          // is up (the name is set via the --name launch flag, so it needs no
+          // timing); these fire when Claude is detected ready (see onSettle).
+          if (!t.reused) {
+            const cn = claudeColorName(el.color)
+            if (el.color && cn !== 'default')
+              launchTasks.push({ data: `/color ${cn}`, enter: true })
+            // first launch only: the initial prompt (no \r so you can review it)
+            if (!el.agentStarted && el.agentPrompt)
+              launchTasks.push({ data: el.agentPrompt, enter: false })
+          }
+          // safety net: become ready even if Claude's UI is never detected, so
+          // the session is marked resumable, the queue isn't stranded, and flow
+          // orchestration re-arms after a re-attach
           readyFallback = setTimeout(becomeReady, 15000)
         }
-        // watch briefly for a launch failure (missing or duplicate session) and self-heal
-        if (watchSession) {
+        // watch briefly for a launch failure (missing or duplicate session) and
+        // self-heal — only on a fresh launch; a re-attach issues no launch
+        if (watchSession && !t.reused) {
           resumeWatch = true
           setTimeout(() => {
             resumeWatch = false

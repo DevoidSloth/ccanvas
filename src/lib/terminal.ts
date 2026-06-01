@@ -3,22 +3,35 @@
 //   • Web   — the optional WebSocket bridge (server/pty-server.mjs)
 // Resolves to null when no real backend is reachable, so the caller can fall
 // back to the in-browser shell.
+//
+// Sessions are keyed by the widget id (stable across a webview reload), so the
+// Tauri backend can re-attach a terminal to its still-running shell after a dev
+// hot-reload instead of spawning a fresh one — see src-tauri/src/pty.rs. The
+// shell is only torn down by `killPty`, which the store calls on real deletion.
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { isTauri } from './backend'
 
 export type Term = {
+  /** true when we re-attached to an already-running shell (it survived a
+   *  reload). The caller must NOT relaunch into it — its process is intact. */
+  reused: boolean
   /** begin streaming output + run the launch command. Call only after the
    *  caller has wired this Term up, so the shell's cursor-position query
    *  (\x1b[6n) gets its reply routed back instead of dropped. */
   start: () => void
   send: (data: string) => void
   resize: (cols: number, rows: number) => void
+  /** detach: stop streaming but leave the shell running so a later mount can
+   *  re-attach. (In web mode there's no persistence, so this closes the socket
+   *  and the server ends the shell.) */
   close: () => void
 }
 
 export type PtyOpts = {
+  /** stable session key — the widget id; survives webview reloads */
+  id: string
   cols: number
   rows: number
   cwd?: string
@@ -37,45 +50,59 @@ export async function connectPty(opts: PtyOpts, h: PtyHandlers): Promise<Term | 
   return isTauri() ? connectTauri(opts, h) : connectWebSocket(opts, h)
 }
 
+/** Tear a shell down for good. Called when the widget is actually deleted, not
+ *  on the incidental unmounts (reload / tab switch) where we want it to live. */
+export function killPty(id: string): void {
+  // Tauri owns persistent sessions; in web mode the shell already dies when its
+  // socket closes on unmount, so there's nothing to kill out of band.
+  if (isTauri()) void invoke('pty_kill', { id })
+}
+
 async function connectTauri(opts: PtyOpts, h: PtyHandlers): Promise<Term | null> {
   try {
-    const id = await invoke<number>('pty_spawn', {
+    const reused = await invoke<boolean>('pty_open', {
+      id: opts.id,
       cols: opts.cols,
       rows: opts.rows,
       cwd: opts.cwd ?? null,
     })
-    console.debug(`[pty] spawn id=${id} launch=${opts.launch ?? ''} cwd=${opts.cwd ?? ''}`)
+    console.debug(
+      `[pty] open id=${opts.id} reused=${reused} launch=${opts.launch ?? ''} cwd=${opts.cwd ?? ''}`,
+    )
     let gotData = false
-    const offData: UnlistenFn = await listen<{ id: number; bytes: number[] }>(
+    const offData: UnlistenFn = await listen<{ id: string; bytes: number[] }>(
       'pty:data',
       (e) => {
-        if (e.payload.id !== id) return
+        if (e.payload.id !== opts.id) return
         if (!gotData) {
           gotData = true
-          console.debug(`[pty] id=${id} first data (${e.payload.bytes.length}b)`)
+          console.debug(`[pty] id=${opts.id} first data (${e.payload.bytes.length}b)`)
         }
         h.onData(new Uint8Array(e.payload.bytes))
       },
     )
-    const offExit: UnlistenFn = await listen<{ id: number }>('pty:exit', (e) => {
-      if (e.payload.id === id) {
-        console.debug(`[pty] id=${id} exit`)
+    const offExit: UnlistenFn = await listen<{ id: string }>('pty:exit', (e) => {
+      if (e.payload.id === opts.id) {
+        console.debug(`[pty] id=${opts.id} exit`)
         h.onExit()
       }
     })
     return {
+      reused,
       start: () => {
-        // flush buffered output + launch only now — transportRef is wired, so
-        // xterm's reply to the shell's \x1b[6n query is sent back, not dropped
-        void invoke('pty_start', { id })
-        if (opts.launch) void invoke('pty_write', { id, data: opts.launch + '\r' })
+        // flush buffered/replayed output + launch only now — transportRef is
+        // wired, so xterm's reply to the shell's \x1b[6n query routes back to
+        // the pty instead of being dropped. Skip launch on a re-attach: the
+        // shell (and any claude in it) is already running.
+        void invoke('pty_start', { id: opts.id })
+        if (opts.launch && !reused) void invoke('pty_write', { id: opts.id, data: opts.launch + '\r' })
       },
-      send: (data) => void invoke('pty_write', { id, data }),
-      resize: (cols, rows) => void invoke('pty_resize', { id, cols, rows }),
+      send: (data) => void invoke('pty_write', { id: opts.id, data }),
+      resize: (cols, rows) => void invoke('pty_resize', { id: opts.id, cols, rows }),
       close: () => {
         offData()
         offExit()
-        void invoke('pty_kill', { id })
+        void invoke('pty_detach', { id: opts.id })
       },
     }
   } catch (err) {
@@ -88,7 +115,7 @@ function connectWebSocket(opts: PtyOpts, h: PtyHandlers): Promise<Term | null> {
   return new Promise((resolve) => {
     let ws: WebSocket
     const query =
-      `?cols=${opts.cols}&rows=${opts.rows}` +
+      `?id=${encodeURIComponent(opts.id)}&cols=${opts.cols}&rows=${opts.rows}` +
       (opts.cwd ? `&cwd=${encodeURIComponent(opts.cwd)}` : '')
     try {
       ws = new WebSocket(WS_URL + query)
@@ -101,6 +128,9 @@ function connectWebSocket(opts: PtyOpts, h: PtyHandlers): Promise<Term | null> {
       opened = true
       ws.send(JSON.stringify({ __ctl: 'resize', cols: opts.cols, rows: opts.rows }))
       resolve({
+        // the web bridge has no cross-reload persistence: every connection is a
+        // fresh shell, so the launch sequence always runs
+        reused: false,
         start: () => {
           if (opts.launch && ws.readyState === WebSocket.OPEN) ws.send(opts.launch + '\r')
         },

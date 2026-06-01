@@ -53,14 +53,36 @@ Without the backend you can still bind a folder by typing a path.
 | Infinite canvas    | Pan (`H` / middle-mouse / two-finger scroll), smooth zoom (⌘/Ctrl-scroll), dot grid |
 | Quick insert       | `Space` drops text at the cursor — `/` then `agent` `term` `files` `diff` `editor` `doc` `log` `web` `note` to spawn a widget |
 | Command palette    | `⌘/Ctrl-K` — spawn widgets, arrange, switch tabs, export, jump to a widget |
-| Vector ink         | Text, freehand draw, arrows (that **bind** to widgets), rectangles, ellipses, frames, images, 6-color palette |
+| Vector ink         | Text, freehand draw, arrows (snap to widget **anchor points**, drag the midpoint to **curve**, drag an endpoint to reconnect), rectangles, ellipses, frames, images, 6-color palette |
 | Widgets            | Terminal · Claude agent · File tree · Git panel · Editor · Live doc · Log tail · Task runner · Web preview (URL **or** local `.html`, live-reloading) · Markdown note |
 | GitHub (gh) widgets | Pull requests · Issues · Actions/CI runs — list, open in browser, create, live status (needs the `gh` CLI) |
-| Agent orchestration| Per-agent activity dot (idle/working/waiting), idle notifications, broadcast-to-many, per-agent model/prompt/flags |
+| Agent orchestration| Per-agent activity dot (idle/working/waiting), idle notifications, broadcast-to-many, per-agent model/prompt/flags, **logic arrows** that chain agents (run the next one when this one finishes / succeeds / fails / matches), right-click **Label box** to wrap an agent in a titled frame |
 | Arrange            | Group, lock, align, distribute, tidy, copy/paste/duplicate, z-order, snapping guides, transform handles, minimap |
 | Right-click menus  | Custom context menus (not the native webview one): canvas elements (duplicate, lock, z-order, delete), file-tree rows (open, **reveal in Explorer/Finder**, copy path), empty canvas (paste, select all) |
 | Tabs               | Multiple `.ccnvs` workspaces open at once, each bound to a folder      |
 | Persistence        | Save/Open into the canvas folder (backend) or File System Access API; reusable widget-layout templates; PNG/SVG export |
+
+## Agent flows (logic arrows)
+
+An arrow drawn **from one agent to another** can carry orchestration logic, so a
+diagram of agents becomes a runnable pipeline. Select the connector and hit
+**+ add logic** in the selection bar:
+
+- **run when** — `on finish` (any completed turn) · `on success` · `on failure`
+  (keyword match on the source agent's last output) · `on match` (your regex).
+  For a reliable signal, tell the agent to end with a sentinel and match it,
+  e.g. `on match` + `STATUS:\s*OK`.
+- **prompt** — the text handed to the target agent (and submitted) when the edge
+  fires. Multi-line prompts are pasted intact.
+- **join** — when a target has several incoming edges: `all` waits for every
+  source to finish (AND — *"after these agents run, run this one"*), `any` fires
+  on the first (OR).
+
+So `A —on success→ B —on finish→ C` runs B only if A reports success, then C
+after B; and `A, B —all→ C` runs C once both A and B are done. Flow edges render
+in the accent colour with a filled head and a condition badge. The whole thing
+has a kill switch — **Pause agent flows** in the command palette (⌘K) — and it
+auto-pauses if edges fire in a runaway loop.
 
 ## Keyboard
 

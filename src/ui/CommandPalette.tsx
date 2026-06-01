@@ -24,6 +24,9 @@ const SPAWNABLE: { kind: WidgetKind; label: string }[] = [
   { kind: 'doc', label: 'Live doc' },
   { kind: 'log', label: 'Log tail' },
   { kind: 'runner', label: 'Task runner' },
+  { kind: 'sql', label: 'SQL editor' },
+  { kind: 'data', label: 'Data viewer (csv/parquet/h5/json)' },
+  { kind: 'plot', label: 'Figure viewer' },
   { kind: 'pr', label: 'Pull requests' },
   { kind: 'issues', label: 'GitHub issues' },
   { kind: 'runs', label: 'GitHub Actions' },
@@ -178,6 +181,13 @@ export function CommandPalette() {
         hint: '\\',
         group: 'View',
         run: () => s.zoomToSelection(window.innerWidth, window.innerHeight - CHROME_H),
+      },
+      {
+        id: 'flows-toggle',
+        label: s.flowsEnabled ? 'Pause agent flows' : 'Resume agent flows',
+        hint: s.flowsEnabled ? 'running' : 'paused',
+        group: 'View',
+        run: () => s.setFlowsEnabled(!s.flowsEnabled),
       },
       {
         id: 'tpl-save',

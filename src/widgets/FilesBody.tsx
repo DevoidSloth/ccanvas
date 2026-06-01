@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { WidgetElement } from '../lib/types'
+import type { WidgetElement, WidgetKind } from '../lib/types'
 import { useStore } from '../store/workspace'
+import { DATA_EXTENSIONS } from '../lib/dataformats'
+import { PLOT_EXTENSIONS } from './PlotBody'
 import {
   listDir,
   revealPath,
@@ -119,9 +121,18 @@ export function FilesBody({ el }: { el: WidgetElement }) {
     void load()
   }, [load])
 
-  const openFile = (path: string) => {
-    spawnWidget('editor', el.x + el.w + 320, el.y + 160, { path, cwd: el.cwd })
+  const openIn = (kind: WidgetKind, path: string) =>
+    spawnWidget(kind, el.x + el.w + 320, el.y + 160, { path, cwd: el.cwd })
+
+  // route by extension: data files → data viewer, images → figure viewer, else editor
+  const kindForFile = (path: string): WidgetKind => {
+    const ext = path.toLowerCase().split('.').pop() ?? ''
+    if (DATA_EXTENSIONS.includes(ext)) return 'data'
+    if (PLOT_EXTENSIONS.includes(ext)) return 'plot'
+    return 'editor'
   }
+
+  const openFile = (path: string) => openIn(kindForFile(path), path)
 
   const rowMenu = (e: React.MouseEvent, entry: DirEntry) => {
     const fm = fileManagerName()
@@ -137,7 +148,12 @@ export function FilesBody({ el }: { el: WidgetElement }) {
           }),
       })
     } else {
-      items.push({ label: 'Open in editor', onClick: () => openFile(entry.path) })
+      const kind = kindForFile(entry.path)
+      if (kind === 'data')
+        items.push({ label: 'Open in data viewer', onClick: () => openIn('data', entry.path) })
+      else if (kind === 'plot')
+        items.push({ label: 'Open in figure viewer', onClick: () => openIn('plot', entry.path) })
+      items.push({ label: 'Open in editor', onClick: () => openIn('editor', entry.path) })
       items.push({
         label: 'Open with default app',
         onClick: () => void openExternal(entry.path),

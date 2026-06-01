@@ -9,7 +9,8 @@
 //   • GET  /default-dir — the user's home directory
 //   • GET  /pick-dir    — native "choose folder" dialog → { path }
 //   • GET  /pick-file   — native "open .ccnvs" dialog   → { path, content }
-//   • GET  /read?path=  — read a file                   → { content }
+//   • GET  /read?path=  — read a file (utf8)             → { content }
+//   • GET  /read-bytes? — read a file (base64 bytes)     → { b64 }
 //   • POST /save        — write a file  { path, content }
 //
 // The canvas needs real folders/paths (for terminal cwd + where .ccnvs
@@ -278,16 +279,30 @@ const server = http.createServer(async (req, res) => {
         if (!p) return send(res, 400, { error: 'missing path' })
         return send(res, 200, { content: await fs.readFile(p, 'utf8') })
       }
+      case '/read-bytes': {
+        const p = url.searchParams.get('path')
+        if (!p) return send(res, 400, { error: 'missing path' })
+        const buf = await fs.readFile(p)
+        return send(res, 200, { b64: buf.toString('base64') })
+      }
       case '/list-dir': {
         const p = url.searchParams.get('path')
         if (!p) return send(res, 400, { error: 'missing path' })
         const dirents = await fs.readdir(p, { withFileTypes: true })
-        const entries = dirents
-          .map((d) => ({
-            name: d.name,
-            path: nodePath.join(p, d.name),
-            is_dir: d.isDirectory(),
-          }))
+        const entries = (
+          await Promise.all(
+            dirents.map(async (d) => {
+              const full = nodePath.join(p, d.name)
+              let mtime = null
+              try {
+                mtime = Math.floor((await fs.stat(full)).mtimeMs)
+              } catch {
+                /* unreadable entry — leave mtime null */
+              }
+              return { name: d.name, path: full, is_dir: d.isDirectory(), mtime }
+            }),
+          )
+        )
           .sort(
             (a, b) =>
               Number(b.is_dir) - Number(a.is_dir) ||

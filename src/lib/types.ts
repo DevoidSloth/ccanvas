@@ -28,6 +28,9 @@ export type WidgetKind =
   | 'issues'
   | 'runs'
   | 'runner'
+  | 'sql'
+  | 'data'
+  | 'plot'
 
 type Base = {
   id: string
@@ -37,6 +40,9 @@ type Base = {
   groupId?: string
   /** locked elements can't be moved, resized, or deleted by normal gestures */
   locked?: boolean
+  /** label-box parts (the frame + name text) carry the widget id they wrap, so
+   *  the box can be toggled off and is cleaned up when that widget is deleted */
+  labelFor?: string
 }
 
 export type DrawElement = Base & {
@@ -47,8 +53,45 @@ export type DrawElement = Base & {
   size: number
 }
 
-/** An arrow endpoint bound to another element — it follows that element. */
-export type ArrowBinding = { id: string }
+/**
+ * An arrow endpoint bound to another element — it follows that element.
+ * `anchor` pins the endpoint to a specific connection point (normalized 0..1
+ * within the element's bounds); without it the endpoint auto-docks to the edge
+ * nearest the other end.
+ */
+export type ArrowBinding = { id: string; anchor?: { nx: number; ny: number } }
+
+/**
+ * When the SOURCE agent finishes a turn, how do we decide whether this edge
+ * fires? Evaluated against the source's just-finished turn output.
+ *  • always   — fire on any turn completion
+ *  • success  — output matches the success keywords (or `pattern` if set)
+ *  • failure  — output matches the failure keywords (or `pattern` if set)
+ *  • match    — output matches `pattern` (a regex)
+ */
+export type FlowCondition = 'always' | 'success' | 'failure' | 'match'
+
+/**
+ * Orchestration logic carried by a connector between two agent widgets. The
+ * arrow's `from` is the source agent, `to` is the target. When the source
+ * finishes a turn and `when` holds, the target receives `prompt` (and Enter).
+ */
+export type ArrowFlow = {
+  /** disabled edges are decorative only (default: enabled) */
+  enabled?: boolean
+  /** condition on the source agent's just-finished turn */
+  when: FlowCondition
+  /** regex source for `match`, or an override for success/failure keywords */
+  pattern?: string
+  /** prompt delivered to the target agent when this edge fires */
+  prompt?: string
+  /**
+   * For a target with several incoming flow edges:
+   *  • all — fire only once every incoming edge is satisfied (AND, default)
+   *  • any — fire as soon as this edge is satisfied (OR)
+   */
+  join?: 'all' | 'any'
+}
 
 export type ArrowElement = Base & {
   type: 'arrow'
@@ -65,6 +108,11 @@ export type ArrowElement = Base & {
   label?: string
   /** dashed instead of solid stroke */
   dashed?: boolean
+  /** logic edge between two agents — see ArrowFlow */
+  flow?: ArrowFlow
+  /** signed perpendicular offset of the curve's apex from the chord midpoint,
+   *  in world units. 0 / undefined = a straight line; ± bows either way. */
+  bend?: number
 }
 
 export type ShapeElement = Base & {
@@ -135,6 +183,10 @@ export type WidgetElement = Base & {
   agentPrompt?: string // initial prompt typed after launch
   skipPermissions?: boolean // pass --dangerously-skip-permissions
   worktree?: string // git worktree branch this agent is isolated in
+  // sql widget — both safe to persist (a key *name* and the query text; the
+  // connection string itself is never stored, it's read from .env at runtime)
+  envKey?: string // which .env key holds the Postgres connection string
+  query?: string // last SQL text, so reopening the canvas restores it
 }
 
 export type CanvasElement =
@@ -206,6 +258,9 @@ export const WIDGET_ACCENT: Record<WidgetKind, string> = {
   issues: '#8bbf73',
   runs: '#d8a657',
   runner: '#8bbf73',
+  sql: '#3ecf8e', // Supabase green
+  data: '#7fc7c0',
+  plot: '#e89bc8',
 }
 
 /** Agent accent colours, each mapped to a valid Claude Code `/color` name. */

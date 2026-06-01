@@ -226,6 +226,22 @@ export const IconImage = (p: P) => (
   </S>
 )
 
+// A data table/grid — the data viewer widget.
+export const IconData = (p: P) => (
+  <S {...p}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+    <path d="M3.5 9.5h17M3.5 14.5h17M9 4.5v15" />
+  </S>
+)
+
+// A framed line+bar chart — the figure/plot viewer widget.
+export const IconPlot = (p: P) => (
+  <S {...p}>
+    <path d="M4 4v15a1 1 0 001 1h15" />
+    <path d="M7 15l3.5-4 3 2.5L20 7" />
+  </S>
+)
+
 export const IconFrame = (p: P) => (
   <S {...p}>
     <path d="M7 3v18M17 3v18M3 7h18M3 17h18" />
@@ -335,6 +351,15 @@ export const IconChecks = (p: P) => (
   <S {...p}>
     <circle cx="12" cy="12" r="8.5" />
     <path d="M8.5 12.2l2.4 2.4 4.6-5" />
+  </S>
+)
+
+// Stacked-disk database cylinder — the SQL editor widget.
+export const IconDatabase = (p: P) => (
+  <S {...p}>
+    <ellipse cx="12" cy="5.5" rx="7" ry="2.5" />
+    <path d="M5 5.5v6c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-6" />
+    <path d="M5 11.5v6c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-6" />
   </S>
 )
 

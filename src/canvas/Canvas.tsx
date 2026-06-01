@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useStore, selectActive, withGroupSiblings } from '../store/workspace'
 import type {
+  ArrowElement,
   CanvasElement,
   FrameElement,
   ImageElement,
@@ -13,6 +14,7 @@ import {
   worldToScreen,
   zoomAt,
   clamp,
+  dist,
   elementBounds,
   hitTest,
   pointInRect,
@@ -21,6 +23,10 @@ import {
   snapBox,
   edgeLines,
   snapValue,
+  ANCHORS,
+  anchorPoint,
+  arrowApex,
+  bendFromApex,
   type Rect,
 } from '../lib/geometry'
 import { newId } from '../lib/id'
@@ -65,6 +71,8 @@ const QUICK_COMMANDS: QuickCommand[] = [
   { name: 'doc', target: 'doc', desc: 'live markdown', aliases: ['readme'] },
   { name: 'log', target: 'log', desc: 'log tail', aliases: ['tail'] },
   { name: 'runner', target: 'runner', desc: 'task runner', aliases: ['run', 'test'] },
+  { name: 'data', target: 'data', desc: 'data viewer', aliases: ['csv', 'parquet', 'table', 'df'] },
+  { name: 'plot', target: 'plot', desc: 'figure viewer', aliases: ['fig', 'figure', 'img', 'chart'] },
   { name: 'pr', target: 'pr', desc: 'pull requests', aliases: ['prs'] },
   { name: 'issues', target: 'issues', desc: 'github issues', aliases: ['issue'] },
   { name: 'actions', target: 'runs', desc: 'github actions / CI', aliases: ['runs', 'ci', 'gh'] },
@@ -86,10 +94,15 @@ function matchCommands(token: string): QuickCommand[] {
   )
 }
 
+/** A resolved connection target for an arrow endpoint. */
+type Bind = { id: string; anchor?: { nx: number; ny: number }; point?: Point }
+
 type Drag =
   | { kind: 'pan'; startCam: Point; startPtr: Point }
   | { kind: 'draw' }
-  | { kind: 'arrow' }
+  | { kind: 'arrow'; fromBind?: Bind }
+  | { kind: 'arrowEnd'; id: string; end: 'from' | 'to'; began: boolean }
+  | { kind: 'curveArrow'; id: string; began: boolean }
   | { kind: 'shape'; ox: number; oy: number }
   | { kind: 'move'; last: Point; startPtr: Point; began: boolean; captured: boolean }
   | { kind: 'marquee'; start: Point }
@@ -144,6 +157,12 @@ export function Canvas() {
   const [marquee, setMarquee] = useState<ScreenRect | null>(null)
   const [panning, setPanning] = useState(false)
   const [insertAt, setInsertAt] = useState<Point | null>(null)
+  // element + active anchor an arrow endpoint would connect to right now (drives
+  // the anchor dots shown while drawing / dragging a connector endpoint)
+  const [bindHover, setBindHover] = useState<Bind | null>(null)
+  // true while re-dragging an existing connector endpoint (so we show the
+  // quick-connect dots on widgets even though the active tool is select)
+  const [endpointDrag, setEndpointDrag] = useState(false)
 
   const cam = ws.camera
   const selSet = new Set(selection)
@@ -261,6 +280,15 @@ export function Canvas() {
         items.push({ separator: true })
       }
     }
+    // an agent → toggle a labelled box (name centred above the window)
+    if (lone?.type === 'widget' && (lone as WidgetElement).kind === 'agent') {
+      const boxed = ws.elements.some((e) => e.labelFor === lone.id)
+      items.push({
+        label: boxed ? 'Remove label box' : 'Label box',
+        onClick: () => s().labelAgent(lone.id),
+      })
+      items.push({ separator: true })
+    }
     items.push({ label: 'Duplicate', hint: '⌘D', onClick: () => s().duplicateSelection() })
     items.push({ label: 'Copy', hint: '⌘C', onClick: () => s().copySelection() })
     items.push({
@@ -330,15 +358,38 @@ export function Canvas() {
     }
   }
 
-  // topmost element an arrow endpoint can bind to
-  const pickBindTarget = (world: Point, excludeId?: string): string | null => {
-    let best: CanvasElement | null = null
+  // What an arrow endpoint at `world` would connect to: snap to a specific
+  // anchor when close to one, else auto-dock when dropped inside an element.
+  // A small magnetic margin makes edge anchors catchable from just outside.
+  const bindAt = (world: Point, excludeId?: string): Bind | null => {
+    const anchorTol = 18 / cam.zoom
+    const margin = 12 / cam.zoom
+    let target: CanvasElement | null = null
     for (const el of ws.elements) {
       if (el.id === excludeId || !BINDABLE.has(el.type)) continue
-      if (pointInRect(world, elementBounds(el)) && (!best || el.z > best.z)) best = el
+      const b = elementBounds(el)
+      const exp = { x: b.x - margin, y: b.y - margin, w: b.w + margin * 2, h: b.h + margin * 2 }
+      if (pointInRect(world, exp) && (!target || el.z > target.z)) target = el
     }
-    return best?.id ?? null
+    if (!target) return null
+    const b = elementBounds(target)
+    let bestA: { nx: number; ny: number } | null = null
+    let bestD = anchorTol
+    for (const a of ANCHORS) {
+      const d = dist(world, { x: b.x + a.nx * b.w, y: b.y + a.ny * b.h })
+      if (d <= bestD) {
+        bestD = d
+        bestA = a
+      }
+    }
+    if (bestA) return { id: target.id, anchor: bestA, point: anchorPoint(target, bestA) }
+    if (pointInRect(world, b)) return { id: target.id } // inside but not near an anchor → auto-dock
+    return null
   }
+
+  /** Strip `point` (UI-only) from a Bind before persisting it on the arrow. */
+  const toBinding = (b?: Bind | null) =>
+    b ? (b.anchor ? { id: b.id, anchor: b.anchor } : { id: b.id }) : undefined
 
   const eraseAt = (world: Point) => {
     const tol = 8 / cam.zoom
@@ -476,8 +527,11 @@ export function Canvas() {
       setDraft({ id, type: 'draw', points: [world.x, world.y], color, size: strokeWidth, z: 0 })
       dragRef.current = { kind: 'draw' }
     } else if (tool === 'arrow') {
-      setDraft({ id, type: 'arrow', x1: world.x, y1: world.y, x2: world.x, y2: world.y, color, size: strokeWidth, z: 0 })
-      dragRef.current = { kind: 'arrow' }
+      // snap the start onto an anchor if pressed over a widget
+      const fromBind = bindAt(world, id)
+      const s = fromBind?.point ?? world
+      setDraft({ id, type: 'arrow', x1: s.x, y1: s.y, x2: s.x, y2: s.y, color, size: strokeWidth, z: 0 })
+      dragRef.current = { kind: 'arrow', fromBind: fromBind ?? undefined }
     } else if (tool === 'rect' || tool === 'ellipse') {
       setDraft({ id, type: tool, x: world.x, y: world.y, w: 0, h: 0, color, size: strokeWidth, z: 0 })
       dragRef.current = { kind: 'shape', ox: world.x, oy: world.y }
@@ -491,7 +545,22 @@ export function Canvas() {
     const pt = getPt(e)
     mouseRef.current = pt
     const drag = dragRef.current
-    if (!drag) return
+    if (!drag) {
+      // preview connection anchors while the arrow tool hovers an element
+      if (tool === 'arrow') {
+        const b = bindAt(screenToWorld(pt, cam))
+        setBindHover((prev) =>
+          prev?.id === b?.id &&
+          prev?.anchor?.nx === b?.anchor?.nx &&
+          prev?.anchor?.ny === b?.anchor?.ny
+            ? prev
+            : b,
+        )
+      } else if (bindHover) {
+        setBindHover(null)
+      }
+      return
+    }
     const world = screenToWorld(pt, cam)
 
     switch (drag.kind) {
@@ -507,9 +576,51 @@ export function Canvas() {
           d?.type === 'draw' ? { ...d, points: [...d.points, world.x, world.y] } : d,
         )
         break
-      case 'arrow':
-        setDraft((d) => (d?.type === 'arrow' ? { ...d, x2: world.x, y2: world.y } : d))
+      case 'arrow': {
+        const b = bindAt(world, draft?.id)
+        setBindHover(b)
+        const end = b?.point ?? world
+        setDraft((d) => (d?.type === 'arrow' ? { ...d, x2: end.x, y2: end.y } : d))
         break
+      }
+      case 'arrowEnd': {
+        if (!drag.began) {
+          beginHistory()
+          drag.began = true
+        }
+        const b = bindAt(world, drag.id)
+        setBindHover(b)
+        const p = b?.point ?? world
+        // detach this end while dragging; rebind happens on pointer up
+        mutateElement(drag.id, (a) => {
+          const ar = a as ArrowElement
+          if (drag.end === 'from') {
+            ar.x1 = p.x
+            ar.y1 = p.y
+            ar.from = b ? toBinding(b) : undefined
+          } else {
+            ar.x2 = p.x
+            ar.y2 = p.y
+            ar.to = b ? toBinding(b) : undefined
+          }
+        })
+        break
+      }
+      case 'curveArrow': {
+        if (!drag.began) {
+          beginHistory()
+          drag.began = true
+        }
+        const a = byId.get(drag.id)
+        if (a?.type === 'arrow') {
+          const r = resolvedArrow(a, byId)
+          const bend = bendFromApex({ x: r.x1, y: r.y1 }, { x: r.x2, y: r.y2 }, world)
+          mutateElement(drag.id, (el) => {
+            ;(el as ArrowElement).bend = Math.abs(bend) < 3 ? undefined : bend
+          })
+        }
+        break
+      }
       case 'shape':
         setDraft((d) =>
           d?.type === 'rect' || d?.type === 'ellipse' || d?.type === 'frame'
@@ -670,12 +781,12 @@ export function Canvas() {
     } else if (drag?.kind === 'arrow' && draft?.type === 'arrow') {
       if (Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > 6) {
         beginHistory()
-        const fromId = pickBindTarget({ x: draft.x1, y: draft.y1 }, draft.id)
-        const toId = pickBindTarget({ x: draft.x2, y: draft.y2 }, draft.id)
+        const from = toBinding(drag.fromBind)
+        const to = toBinding(bindAt({ x: draft.x2, y: draft.y2 }, draft.id))
         addElement({
           ...draft,
-          ...(fromId ? { from: { id: fromId } } : {}),
-          ...(toId ? { to: { id: toId } } : {}),
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {}),
         })
       }
     } else if (
@@ -698,7 +809,24 @@ export function Canvas() {
 
     setDraft(null)
     setMarquee(null)
+    setBindHover(null)
+    setEndpointDrag(false)
     dragRef.current = null
+  }
+
+  // begin dragging one endpoint of a selected arrow to (re)connect it
+  const onArrowEndDown = (e: React.PointerEvent, id: string, end: 'from' | 'to') => {
+    e.stopPropagation()
+    rootRef.current?.setPointerCapture(e.pointerId)
+    dragRef.current = { kind: 'arrowEnd', id, end, began: false }
+    setEndpointDrag(true)
+  }
+
+  // begin dragging an arrow's midpoint handle to curve it
+  const onCurveDown = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation()
+    rootRef.current?.setPointerCapture(e.pointerId)
+    dragRef.current = { kind: 'curveArrow', id, began: false }
   }
 
   // ---- drag-drop image files onto the canvas ----
@@ -746,7 +874,15 @@ export function Canvas() {
       }
       if (target) {
         const init: Partial<WidgetElement> = {}
-        if (rest && (target === 'editor' || target === 'doc' || target === 'log')) init.path = rest
+        if (
+          rest &&
+          (target === 'editor' ||
+            target === 'doc' ||
+            target === 'log' ||
+            target === 'data' ||
+            target === 'plot')
+        )
+          init.path = rest
         if (rest && target === 'web') init.url = rest
         if (rest && target === 'runner') init.cmd = rest
         const id = spawnWidget(target, world.x, world.y, init)
@@ -783,6 +919,16 @@ export function Canvas() {
     !lone.locked
       ? lone
       : undefined
+  // a single selected connector gets draggable endpoints (to re-connect) and a
+  // midpoint handle (to curve it)
+  const arrowHandles =
+    lone && lone.type === 'arrow' && !lone.locked ? resolvedArrow(lone, byId) : undefined
+  // while wiring a connector (arrow tool, or re-dragging an endpoint), show
+  // quick-connect anchor dots on every widget so targets are never a guess
+  const showAnchors = tool === 'arrow' || endpointDrag
+  const anchorWidgets = showAnchors
+    ? ws.elements.filter((el): el is WidgetElement => el.type === 'widget')
+    : []
 
   const vectorEls = ws.elements
     .filter(
@@ -917,6 +1063,66 @@ export function Canvas() {
               />
             )
           })}
+        {/* quick-connect dots on every widget's corners + midpoints */}
+        {anchorWidgets.map((el) =>
+          ANCHORS.map((a, i) => {
+            const s = worldToScreen(anchorPoint(el, a), cam)
+            const active =
+              bindHover?.id === el.id &&
+              bindHover?.anchor?.nx === a.nx &&
+              bindHover?.anchor?.ny === a.ny
+            return (
+              <div
+                key={`anchor-${el.id}-${i}`}
+                className={`arrow-anchor${active ? ' arrow-anchor--active' : ''}`}
+                style={{ left: s.x, top: s.y }}
+              />
+            )
+          }),
+        )}
+
+        {/* selected connector: endpoint handles + a midpoint curve handle */}
+        {arrowHandles &&
+          (() => {
+            const p1 = worldToScreen({ x: arrowHandles.x1, y: arrowHandles.y1 }, cam)
+            const p2 = worldToScreen({ x: arrowHandles.x2, y: arrowHandles.y2 }, cam)
+            const apexW = arrowApex(
+              { x: arrowHandles.x1, y: arrowHandles.y1 },
+              { x: arrowHandles.x2, y: arrowHandles.y2 },
+              arrowHandles.bend,
+            )
+            const ap = worldToScreen(apexW, cam)
+            const id = arrowHandles.id
+            return (
+              <>
+                <div
+                  className="arrow-handle arrow-handle--end"
+                  style={{ left: p1.x, top: p1.y }}
+                  title="Drag to reconnect this end"
+                  onPointerDown={(e) => onArrowEndDown(e, id, 'from')}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                />
+                <div
+                  className="arrow-handle arrow-handle--end"
+                  style={{ left: p2.x, top: p2.y }}
+                  title="Drag to reconnect this end"
+                  onPointerDown={(e) => onArrowEndDown(e, id, 'to')}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                />
+                <div
+                  className="arrow-handle arrow-handle--curve"
+                  style={{ left: ap.x, top: ap.y }}
+                  title="Drag to curve"
+                  onPointerDown={(e) => onCurveDown(e, id)}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                />
+              </>
+            )
+          })()}
+
         {marquee && (
           <div
             className="sel-box sel-box--marquee"

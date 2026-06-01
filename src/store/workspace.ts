@@ -2,13 +2,15 @@ import { create } from 'zustand'
 import type {
   Camera,
   CanvasElement,
+  FrameElement,
+  TextElement,
   Tool,
   Workspace,
   WidgetElement,
   WidgetKind,
   Template,
 } from '../lib/types'
-import { DEFAULT_CAMERA, PALETTE } from '../lib/types'
+import { DEFAULT_CAMERA, PALETTE, WIDGET_ACCENT } from '../lib/types'
 import { boundsOfMany, clamp, elementBounds, translated } from '../lib/geometry'
 import { newId } from '../lib/id'
 import {
@@ -30,6 +32,8 @@ import {
   dirName,
   joinPath,
 } from '../lib/backend'
+import { resetFlowState } from '../lib/flow'
+import { killPty } from '../lib/terminal'
 
 let zCounter = 1
 const nextZ = () => zCounter++
@@ -77,6 +81,9 @@ const WIDGET_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   issues: { w: 460, h: 360 },
   runs: { w: 500, h: 360 },
   runner: { w: 520, h: 360 },
+  sql: { w: 760, h: 500 },
+  data: { w: 680, h: 460 },
+  plot: { w: 520, h: 440 },
 }
 const WIDGET_TITLE: Record<WidgetKind, string> = {
   terminal: 'terminal',
@@ -92,6 +99,9 @@ const WIDGET_TITLE: Record<WidgetKind, string> = {
   issues: 'issues',
   runs: 'actions',
   runner: 'runner',
+  sql: 'sql editor',
+  data: 'data',
+  plot: 'figure',
 }
 
 /** Expand a set of ids to include every sibling sharing a groupId. */
@@ -159,6 +169,8 @@ export type Store = {
   snapGuides: { vx: number | null; hy: number | null } | null
   /** frame-by-frame presentation mode */
   presenting: boolean
+  /** master switch for arrow orchestration (flow edges between agents) */
+  flowsEnabled: boolean
 
   // ----- derived -----
   active: () => Workspace | null
@@ -203,6 +215,8 @@ export type Store = {
     x: number,
     y: number,
   ) => void
+  /** wrap a widget in a labelled box (a frame + its name centred in the top gap) */
+  labelAgent: (id: string) => void
 
   // ----- selection -----
   setSelection: (ids: string[]) => void
@@ -250,6 +264,9 @@ export type Store = {
   /** zoom/pan to fit the current selection (or everything) in vw×vh px */
   zoomToSelection: (vw: number, vh: number) => void
 
+  // ----- flows -----
+  setFlowsEnabled: (on: boolean) => void
+
   // ----- history -----
   beginHistory: () => void
   undo: () => void
@@ -278,6 +295,7 @@ export const useStore = create<Store>((set, get) => ({
   agentWizard: null,
   snapGuides: null,
   presenting: false,
+  flowsEnabled: true,
 
   active: () => {
     const s = get()
@@ -321,7 +339,13 @@ export const useStore = create<Store>((set, get) => ({
     }))
   },
 
-  closeTab: (id) =>
+  closeTab: (id) => {
+    // closing a tab discards its widgets for good — end their shells too
+    const tab = get().tabs.find((t) => t.id === id)
+    if (tab)
+      for (const e of tab.elements)
+        if (e.type === 'widget' && (e.kind === 'terminal' || e.kind === 'agent'))
+          killPty(e.id)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
       let tabs = s.tabs.filter((t) => t.id !== id)
@@ -341,7 +365,8 @@ export const useStore = create<Store>((set, get) => ({
         activeTabId = tabs[idx]?.id ?? tabs[idx - 1]?.id ?? tabs[0].id
       }
       return { tabs, activeTabId, selection: [], activeWidgetId: null }
-    }),
+    })
+  },
 
   switchTab: (id) =>
     set({ activeTabId: id, selection: [], activeWidgetId: null, editingTextId: null }),
@@ -494,10 +519,26 @@ export const useStore = create<Store>((set, get) => ({
 
   removeElements: (ids) => {
     const set_ = new Set(ids)
+    const ws = get().active()
+    // also remove any label-box parts (frame + name) attached to a removed widget
+    if (ws)
+      for (const e of ws.elements)
+        if (e.labelFor && set_.has(e.labelFor)) set_.add(e.id)
+    // tear down the real shells behind any terminal/agent widgets being removed.
+    // Incidental unmounts (a dev hot-reload, a tab switch) never come through
+    // here, so those sessions stay alive to be re-attached.
+    if (ws)
+      for (const e of ws.elements)
+        if (
+          set_.has(e.id) &&
+          e.type === 'widget' &&
+          (e.kind === 'terminal' || e.kind === 'agent')
+        )
+          killPty(e.id)
     set((s) =>
-      patchActive(s, (ws) => ({
-        ...ws,
-        elements: ws.elements.filter((e) => !set_.has(e.id)),
+      patchActive(s, (w) => ({
+        ...w,
+        elements: w.elements.filter((e) => !set_.has(e.id)),
         dirty: true,
       })),
     )
@@ -558,6 +599,57 @@ export const useStore = create<Store>((set, get) => ({
       z: 0,
     })
     set({ selection: [id], tool: 'select' })
+  },
+
+  labelAgent: (id) => {
+    const ws = get().active()
+    if (!ws) return
+    const el = ws.elements.find((e) => e.id === id)
+    if (!el || el.type !== 'widget') return
+    // toggle: if this widget already has a label box, remove it instead
+    const existing = ws.elements.filter((e) => e.labelFor === id)
+    if (existing.length) {
+      get().beginHistory()
+      get().removeElements(existing.map((e) => e.id))
+      return
+    }
+    const w = el as WidgetElement
+    // a tall top gap holds the name; even padding elsewhere centres the widget
+    const padX = 28
+    const padBottom = 28
+    const topGap = 56
+    const accent = w.color || WIDGET_ACCENT[w.kind] || PALETTE[4]
+    const frame: FrameElement = {
+      id: newId(),
+      type: 'frame',
+      x: w.x - padX,
+      y: w.y - topGap,
+      w: w.w + padX * 2,
+      h: w.h + topGap + padBottom,
+      // blank title — the centred text below is the visible label
+      title: '',
+      color: accent,
+      z: 0,
+      labelFor: id,
+    }
+    const name = w.title || 'agent'
+    const fontSize = 16
+    const approxW = Math.max(20, name.length * fontSize * 0.6)
+    const label: TextElement = {
+      id: newId(),
+      type: 'text',
+      // centre over the widget, vertically mid-way in the top gap
+      x: w.x + w.w / 2 - approxW / 2,
+      y: w.y - topGap / 2 - (fontSize * 1.4) / 2,
+      text: name,
+      color: accent,
+      fontSize,
+      z: 0,
+      labelFor: id,
+    }
+    get().beginHistory()
+    get().addElements([frame, label])
+    set({ selection: [frame.id], tool: 'select' })
   },
 
   // ---------- selection ----------
@@ -1003,6 +1095,12 @@ export const useStore = create<Store>((set, get) => ({
     const cx = b.x + b.w / 2
     const cy = b.y + b.h / 2
     get().setCamera({ zoom, x: vw / 2 - cx * zoom, y: vh / 2 - cy * zoom })
+  },
+
+  // ---------- flows ----------
+  setFlowsEnabled: (on) => {
+    if (!on) resetFlowState() // drop pending satisfied/turn bookkeeping
+    set({ flowsEnabled: on })
   },
 
   // ---------- history ----------

@@ -84,13 +84,17 @@ export function elementBounds(el: CanvasElement): Rect {
       if (!isFinite(minX)) return { x: 0, y: 0, w: 0, h: 0 }
       return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
     }
-    case 'arrow':
-      return normRect({
-        x: el.x1,
-        y: el.y1,
-        w: el.x2 - el.x1,
-        h: el.y2 - el.y1,
-      })
+    case 'arrow': {
+      const r = normRect({ x: el.x1, y: el.y1, w: el.x2 - el.x1, h: el.y2 - el.y1 })
+      if (!el.bend) return r
+      // a curve bows past the chord — grow the box to include the apex
+      const ap = arrowApex({ x: el.x1, y: el.y1 }, { x: el.x2, y: el.y2 }, el.bend)
+      const minX = Math.min(r.x, ap.x)
+      const minY = Math.min(r.y, ap.y)
+      const maxX = Math.max(r.x + r.w, ap.x)
+      const maxY = Math.max(r.y + r.h, ap.y)
+      return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+    }
     case 'text':
       // approximate; refined by the DOM measurement at render time
       return {
@@ -129,11 +133,20 @@ export function hitTest(
       }
       return false
     }
-    case 'arrow':
-      return (
-        distToSegment(p, { x: el.x1, y: el.y1 }, { x: el.x2, y: el.y2 }) <=
-        tolWorld + el.size
-      )
+    case 'arrow': {
+      const p1 = { x: el.x1, y: el.y1 }
+      const p2 = { x: el.x2, y: el.y2 }
+      if (!el.bend) return distToSegment(p, p1, p2) <= tolWorld + el.size
+      // sample the curve and test the polyline
+      const c = arrowControl(p1, p2, el.bend)
+      let prev = p1
+      for (let i = 1; i <= 12; i++) {
+        const cur = quadAt(p1, c, p2, i / 12)
+        if (distToSegment(p, prev, cur) <= tolWorld + el.size) return true
+        prev = cur
+      }
+      return false
+    }
     case 'ellipse': {
       const cx = el.x + el.w / 2
       const cy = el.y + el.h / 2
@@ -176,6 +189,77 @@ export function edgePoint(r: Rect, toward: Point): Point {
   const sy = dy !== 0 ? hh / Math.abs(dy) : Infinity
   const s = Math.min(sx, sy)
   return { x: cx + dx * s, y: cy + dy * s }
+}
+
+// ---------- connection anchors ----------
+
+/**
+ * Normalized connection points a connector endpoint can dock to: the four
+ * corners and the four edge midpoints. Coordinates are fractions of the
+ * element bounds. (Dropping inside, away from any of these, auto-docks.)
+ */
+export const ANCHORS: { nx: number; ny: number }[] = [
+  { nx: 0, ny: 0 }, // top-left
+  { nx: 0.5, ny: 0 }, // top
+  { nx: 1, ny: 0 }, // top-right
+  { nx: 1, ny: 0.5 }, // right
+  { nx: 1, ny: 1 }, // bottom-right
+  { nx: 0.5, ny: 1 }, // bottom
+  { nx: 0, ny: 1 }, // bottom-left
+  { nx: 0, ny: 0.5 }, // left
+]
+
+/** World position of a normalized anchor on an element. */
+export function anchorPoint(el: CanvasElement, a: { nx: number; ny: number }): Point {
+  const b = elementBounds(el)
+  return { x: b.x + a.nx * b.w, y: b.y + a.ny * b.h }
+}
+
+// ---------- curved connectors (quadratic Bézier) ----------
+// An arrow's `bend` is the signed perpendicular distance of its apex from the
+// chord midpoint. The control point that realizes that apex sits twice as far
+// out (since a quadratic curve passes through the midpoint of mid↔control).
+
+/** Control point of the quadratic that realizes an arrow's bend. */
+export function arrowControl(p1: Point, p2: Point, bend?: number): Point {
+  const mx = (p1.x + p2.x) / 2
+  const my = (p1.y + p2.y) / 2
+  if (!bend) return { x: mx, y: my }
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const len = Math.hypot(dx, dy) || 1
+  return { x: mx + (-dy / len) * bend * 2, y: my + (dx / len) * bend * 2 }
+}
+
+/** The apex (draggable midpoint) of a possibly-curved arrow. */
+export function arrowApex(p1: Point, p2: Point, bend?: number): Point {
+  const mx = (p1.x + p2.x) / 2
+  const my = (p1.y + p2.y) / 2
+  if (!bend) return { x: mx, y: my }
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const len = Math.hypot(dx, dy) || 1
+  return { x: mx + (-dy / len) * bend, y: my + (dx / len) * bend }
+}
+
+/** Signed bend implied by dragging the apex handle to world point `h`. */
+export function bendFromApex(p1: Point, p2: Point, h: Point): number {
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const len = Math.hypot(dx, dy) || 1
+  const mx = (p1.x + p2.x) / 2
+  const my = (p1.y + p2.y) / 2
+  // project (h - mid) onto the unit perpendicular (-dy, dx)/len
+  return ((h.x - mx) * (-dy / len) + (h.y - my) * (dx / len))
+}
+
+/** Point on a quadratic Bézier at parameter t. */
+export function quadAt(p1: Point, c: Point, p2: Point, t: number): Point {
+  const u = 1 - t
+  return {
+    x: u * u * p1.x + 2 * u * t * c.x + t * t * p2.x,
+    y: u * u * p1.y + 2 * u * t * c.y + t * t * p2.y,
+  }
 }
 
 /** Return a copy of `el` translated by (dx, dy), handling every element type. */
@@ -222,8 +306,18 @@ export function resolvedArrow(
   if (!fromEl && !toEl) return a
   const fromCenter = fromEl ? centerOf(fromEl) : { x: a.x1, y: a.y1 }
   const toCenter = toEl ? centerOf(toEl) : { x: a.x2, y: a.y2 }
-  const p1 = fromEl ? edgePoint(elementBounds(fromEl), toCenter) : { x: a.x1, y: a.y1 }
-  const p2 = toEl ? edgePoint(elementBounds(toEl), fromCenter) : { x: a.x2, y: a.y2 }
+  // an explicit anchor pins the endpoint; otherwise dock to the edge nearest
+  // the other end
+  const p1 = fromEl
+    ? a.from?.anchor
+      ? anchorPoint(fromEl, a.from.anchor)
+      : edgePoint(elementBounds(fromEl), toCenter)
+    : { x: a.x1, y: a.y1 }
+  const p2 = toEl
+    ? a.to?.anchor
+      ? anchorPoint(toEl, a.to.anchor)
+      : edgePoint(elementBounds(toEl), fromCenter)
+    : { x: a.x2, y: a.y2 }
   return { ...a, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y }
 }
 

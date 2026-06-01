@@ -26,6 +26,7 @@ import {
   IconRun,
   IconIssue,
   IconChecks,
+  IconDatabase,
 } from './icons'
 
 type IconCmp = (p: { className?: string; size?: number }) => JSX.Element
@@ -60,6 +61,7 @@ const CODE_ITEMS: FlyItem[] = [
   { key: 'doc', Icon: IconDoc, label: 'Live doc' },
   { key: 'log', Icon: IconLog, label: 'Log tail' },
   { key: 'runner', Icon: IconRun, label: 'Task runner' },
+  { key: 'sql', Icon: IconDatabase, label: 'SQL editor' },
 ]
 // GitHub CLI panels collapse into their own flyout.
 const GITHUB_ITEMS: FlyItem[] = [
