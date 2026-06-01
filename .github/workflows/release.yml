@@ -1,0 +1,90 @@
+name: Release
+
+# Builds signed-or-unsigned installers for every desktop platform and attaches
+# them to a GitHub Release. macOS and Linux cannot be cross-compiled from a
+# Windows machine, so this runs each target on its own native runner.
+#
+#   • Push a tag  v*           → builds all platforms and publishes that release.
+#   • Run manually (dispatch)  → builds all platforms and uploads them to the
+#                                release for the tag you supply (e.g. v0.1.0).
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach binaries to (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # one universal binary → a single DMG that runs on Apple Silicon + Intel
+          - platform: macos-latest
+            label: macOS (universal)
+            args: '--target universal-apple-darwin'
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          - platform: ubuntu-22.04
+            label: Linux (x86_64)
+            args: ''
+            rust-targets: ''
+          - platform: windows-latest
+            label: Windows (x86_64)
+            args: ''
+            rust-targets: ''
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl wget file \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: 'ccanvas __VERSION__'
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

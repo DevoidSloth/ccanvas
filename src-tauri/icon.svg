@@ -1,0 +1,39 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="36%" r="82%">
+      <stop offset="0%" stop-color="#15171d"/>
+      <stop offset="58%" stop-color="#0c0d10"/>
+      <stop offset="100%" stop-color="#08090b"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8795a" stop-opacity="0.38"/>
+      <stop offset="70%" stop-color="#e8795a" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#e8795a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="clay" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#f3936f"/>
+      <stop offset="100%" stop-color="#e07050"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded dark backdrop -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect x="4" y="4" width="1016" height="1016" rx="228" fill="none" stroke="#262a32" stroke-width="3"/>
+
+  <!-- soft accent glow -->
+  <circle cx="512" cy="512" r="340" fill="url(#glow)"/>
+
+  <!-- aperture ring -->
+  <circle cx="512" cy="512" r="290" fill="none" stroke="url(#clay)" stroke-width="46"/>
+
+  <!-- crosshair registration ticks at the cardinal points -->
+  <g stroke="url(#clay)" stroke-width="46" stroke-linecap="round">
+    <path d="M512 150 V 252"/>
+    <path d="M512 772 V 874"/>
+    <path d="M150 512 H 252"/>
+    <path d="M772 512 H 874"/>
+  </g>
+
+  <!-- focal dot -->
+  <circle cx="512" cy="512" r="66" fill="#f6a98f"/>
+</svg>
