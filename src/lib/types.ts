@@ -31,6 +31,7 @@ export type WidgetKind =
   | 'sql'
   | 'data'
   | 'plot'
+  | 'transcript'
 
 type Base = {
   id: string
@@ -43,6 +44,9 @@ type Base = {
   /** label-box parts (the frame + name text) carry the widget id they wrap, so
    *  the box can be toggled off and is cleaned up when that widget is deleted */
   labelFor?: string
+  /** elements spawned by the agent-tracking camera carry the tracked agent's id,
+   *  so "stop & clear" can remove the orbit (satellite widgets + their arrows) */
+  trackOf?: string
 }
 
 export type DrawElement = Base & {
@@ -187,6 +191,8 @@ export type WidgetElement = Base & {
   // connection string itself is never stored, it's read from .env at runtime)
   envKey?: string // which .env key holds the Postgres connection string
   query?: string // last SQL text, so reopening the canvas restores it
+  /** transcript widget: the agent widget whose conversation it mirrors */
+  agentId?: string
 }
 
 export type CanvasElement =
@@ -244,6 +250,13 @@ export type Template = {
   }>
 }
 
+/** A reusable prompt snippet kept in the prompt library (localStorage). */
+export type Prompt = {
+  id: string
+  name: string
+  text: string
+}
+
 export const WIDGET_ACCENT: Record<WidgetKind, string> = {
   terminal: '#e8795a',
   agent: '#c89bd6',
@@ -261,6 +274,7 @@ export const WIDGET_ACCENT: Record<WidgetKind, string> = {
   sql: '#3ecf8e', // Supabase green
   data: '#7fc7c0',
   plot: '#e89bc8',
+  transcript: '#b9a8e0',
 }
 
 /** Agent accent colours, each mapped to a valid Claude Code `/color` name. */

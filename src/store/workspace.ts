@@ -9,6 +9,7 @@ import type {
   WidgetElement,
   WidgetKind,
   Template,
+  Prompt,
 } from '../lib/types'
 import { DEFAULT_CAMERA, PALETTE, WIDGET_ACCENT } from '../lib/types'
 import { boundsOfMany, clamp, elementBounds, translated } from '../lib/geometry'
@@ -22,6 +23,8 @@ import {
   fromFile,
   loadTemplates,
   saveTemplates,
+  loadPrompts,
+  savePrompts,
 } from '../lib/persistence'
 import {
   backendOnline,
@@ -33,6 +36,7 @@ import {
   joinPath,
 } from '../lib/backend'
 import { resetFlowState } from '../lib/flow'
+import { startTracking, stopTracking } from '../lib/tracker'
 import { killPty } from '../lib/terminal'
 
 let zCounter = 1
@@ -84,6 +88,7 @@ const WIDGET_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   sql: { w: 760, h: 500 },
   data: { w: 680, h: 460 },
   plot: { w: 520, h: 440 },
+  transcript: { w: 460, h: 520 },
 }
 const WIDGET_TITLE: Record<WidgetKind, string> = {
   terminal: 'terminal',
@@ -102,6 +107,7 @@ const WIDGET_TITLE: Record<WidgetKind, string> = {
   sql: 'sql editor',
   data: 'data',
   plot: 'figure',
+  transcript: 'transcript',
 }
 
 /** Expand a set of ids to include every sibling sharing a groupId. */
@@ -152,6 +158,9 @@ export type AgentWizardCtx = {
   agentPrompt?: string
 }
 
+/** Side panels that share the right-hand dock (only one open at a time). */
+export type SidePanel = 'roster' | 'prompts' | 'checkpoints'
+
 export type Store = {
   tabs: Workspace[]
   activeTabId: string | null
@@ -163,8 +172,18 @@ export type Store = {
   activeWidgetId: string | null
   editingTextId: string | null
   templates: Template[]
+  /** reusable prompt snippets (prompt library) */
+  prompts: Prompt[]
   paletteOpen: boolean
   agentWizard: AgentWizardCtx | null
+  /** which docked side panel is open (roster / prompts / checkpoints), if any */
+  openPanel: SidePanel | null
+  /** the canvas-wide content search overlay */
+  searchOpen: boolean
+  /** auto-pan the camera to whichever agent most recently started working */
+  followAgent: boolean
+  /** the agent currently being followed by the tracking camera, if any */
+  trackingAgentId: string | null
   /** active alignment guide lines (world coords), shown while moving/resizing */
   snapGuides: { vx: number | null; hy: number | null } | null
   /** frame-by-frame presentation mode */
@@ -252,6 +271,21 @@ export type Store = {
   // ----- command palette -----
   setPaletteOpen: (open: boolean) => void
 
+  // ----- side panels / search -----
+  setOpenPanel: (p: SidePanel | null) => void
+  togglePanel: (p: SidePanel) => void
+  setSearchOpen: (open: boolean) => void
+
+  // ----- prompt library -----
+  savePrompt: (name: string, text: string) => void
+  updatePrompt: (id: string, patch: Partial<Prompt>) => void
+  deletePrompt: (id: string) => void
+
+  // ----- agent cameras -----
+  setFollowAgent: (on: boolean) => void
+  startTrackingAgent: (id: string) => Promise<void>
+  stopTrackingAgent: (cleanup: boolean) => void
+
   // ----- agent wizard -----
   openAgentWizard: (ctx: AgentWizardCtx) => void
   closeAgentWizard: () => void
@@ -291,8 +325,13 @@ export const useStore = create<Store>((set, get) => ({
   activeWidgetId: null,
   editingTextId: null,
   templates: loadTemplates(),
+  prompts: loadPrompts(),
   paletteOpen: false,
   agentWizard: null,
+  openPanel: null,
+  searchOpen: false,
+  followAgent: false,
+  trackingAgentId: null,
   snapGuides: null,
   presenting: false,
   flowsEnabled: true,
@@ -342,10 +381,14 @@ export const useStore = create<Store>((set, get) => ({
   closeTab: (id) => {
     // closing a tab discards its widgets for good — end their shells too
     const tab = get().tabs.find((t) => t.id === id)
-    if (tab)
+    const trackId = get().trackingAgentId
+    if (tab) {
+      if (trackId && tab.elements.some((e) => e.id === trackId))
+        get().stopTrackingAgent(false)
       for (const e of tab.elements)
         if (e.type === 'widget' && (e.kind === 'terminal' || e.kind === 'agent'))
           killPty(e.id)
+    }
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
       let tabs = s.tabs.filter((t) => t.id !== id)
@@ -519,6 +562,9 @@ export const useStore = create<Store>((set, get) => ({
 
   removeElements: (ids) => {
     const set_ = new Set(ids)
+    // tracking ends if the tracked agent itself is being removed
+    const trackId = get().trackingAgentId
+    if (trackId && set_.has(trackId)) get().stopTrackingAgent(false)
     const ws = get().active()
     // also remove any label-box parts (frame + name) attached to a removed widget
     if (ws)
@@ -1073,6 +1119,40 @@ export const useStore = create<Store>((set, get) => ({
 
   // ---------- command palette ----------
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+
+  // ---------- side panels / search ----------
+  setOpenPanel: (p) => set({ openPanel: p }),
+  togglePanel: (p) => set((s) => ({ openPanel: s.openPanel === p ? null : p })),
+  setSearchOpen: (open) => set({ searchOpen: open }),
+
+  // ---------- prompt library ----------
+  savePrompt: (name, text) => {
+    const prompt: Prompt = { id: newId(), name: name.trim() || 'prompt', text }
+    const prompts = [...get().prompts, prompt]
+    savePrompts(prompts)
+    set({ prompts })
+  },
+  updatePrompt: (id, patch) => {
+    const prompts = get().prompts.map((p) => (p.id === id ? { ...p, ...patch } : p))
+    savePrompts(prompts)
+    set({ prompts })
+  },
+  deletePrompt: (id) => {
+    const prompts = get().prompts.filter((p) => p.id !== id)
+    savePrompts(prompts)
+    set({ prompts })
+  },
+
+  // ---------- agent cameras ----------
+  setFollowAgent: (on) => set({ followAgent: on }),
+  startTrackingAgent: async (id) => {
+    const ok = await startTracking(id)
+    if (ok) set({ trackingAgentId: id })
+  },
+  stopTrackingAgent: (cleanup) => {
+    stopTracking(cleanup)
+    set({ trackingAgentId: null })
+  },
 
   // ---------- agent wizard ----------
   openAgentWizard: (ctx) => set({ agentWizard: ctx }),

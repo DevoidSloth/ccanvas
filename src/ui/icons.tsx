@@ -379,6 +379,40 @@ export const IconSettings = (p: P) => (
   </S>
 )
 
+// Speech bubble with lines — the agent transcript widget.
+export const IconChat = (p: P) => (
+  <S {...p}>
+    <path d="M4 5.5h16a1 1 0 011 1v8a1 1 0 01-1 1H9l-4 3.5V15.5H4a1 1 0 01-1-1v-8a1 1 0 011-1z" />
+    <path d="M7 9.5h10M7 12.5h6" />
+  </S>
+)
+
+// A camera/viewfinder — the agent-tracking camera control.
+export const IconTrack = (p: P) => (
+  <S {...p}>
+    <circle cx="12" cy="12" r="3.2" />
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+    <circle cx="12" cy="12" r="8.5" />
+  </S>
+)
+
+// Crosshair within brackets — the follow-active-agent toggle.
+export const IconFollow = (p: P) => (
+  <S {...p}>
+    <path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3" />
+    <circle cx="12" cy="12" r="2.4" />
+  </S>
+)
+
+// Clock with a back-arrow — checkpoints / restore.
+export const IconHistory = (p: P) => (
+  <S {...p}>
+    <path d="M4 12a8 8 0 108-8 8 8 0 00-6.5 3.3" />
+    <path d="M4 4v3.3h3.3" />
+    <path d="M12 8v4l2.5 2" />
+  </S>
+)
+
 export const IconTemplate = (p: P) => (
   <S {...p}>
     <rect x="3.5" y="3.5" width="17" height="17" rx="2" />

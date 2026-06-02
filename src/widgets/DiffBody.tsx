@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WidgetElement } from '../lib/types'
 import { runCommand, watchPath, readFile, resolvePath } from '../lib/backend'
 import { IconReload } from '../ui/icons'
@@ -22,6 +22,29 @@ function classify(line: string): string {
   if (/^-/.test(line)) return 'diff__del'
   return ''
 }
+
+// split a repo-relative path into its filename and leading directory, so the
+// file list can show the name bright and the directory dimmed (GH Desktop style)
+function splitPath(p: string): { name: string; dir: string } {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return i >= 0 ? { name: p.slice(i + 1), dir: p.slice(0, i + 1) } : { name: p, dir: '' }
+}
+
+// The diff can be thousands of lines; isolating it behind memo() means typing in
+// the commit composer (or any unrelated state change) no longer re-splits the
+// text and re-reconciles every line div — the main source of the panel's lag.
+const DiffView = memo(function DiffView({ text }: { text: string }) {
+  const lines = useMemo(() => text.split('\n'), [text])
+  return (
+    <pre className="diff__body">
+      {lines.map((line, i) => (
+        <div key={i} className={classify(line)}>
+          {line || ' '}
+        </div>
+      ))}
+    </pre>
+  )
+})
 
 function parseStatus(out: string): FileEntry[] {
   const files: FileEntry[] = []
@@ -414,11 +437,20 @@ export function DiffBody({ el }: { el: WidgetElement }) {
                 {files.length === 0 && <div className="git__clean">No local changes</div>}
                 {files.map((f) => {
                   const lbl = fileLabel(f)
+                  const { name, dir } = splitPath(f.path)
                   return (
                     <div
                       key={f.path}
                       className={`ghd__file${sel === f.path ? ' ghd__file--sel' : ''}`}
                       onClick={() => setSel(f.path)}
+                      draggable
+                      title={`${f.path}\n(drag onto an agent to add as @context)`}
+                      onDragStart={(e) => {
+                        const abs = resolvePath(cwd, f.path)
+                        e.dataTransfer.setData('application/x-ccanvas-file', abs)
+                        e.dataTransfer.setData('text/plain', abs)
+                        e.dataTransfer.effectAllowed = 'copy'
+                      }}
                     >
                       <input
                         type="checkbox"
@@ -434,9 +466,12 @@ export function DiffBody({ el }: { el: WidgetElement }) {
                         }
                       />
                       <span className="ghd__fname" title={f.path}>
-                        {f.path}
+                        <span className="ghd__fname-name">{name}</span>
+                        {dir && <span className="ghd__fname-dir">{dir}</span>}
                       </span>
-                      <span className={`ghd__badge ${lbl.cls}`}>{lbl.glyph}</span>
+                      <span className={`ghd__badge ${lbl.cls}`} title={lbl.glyph}>
+                        {lbl.glyph}
+                      </span>
                     </div>
                   )
                 })}
@@ -497,13 +532,7 @@ export function DiffBody({ el }: { el: WidgetElement }) {
         {/* diff pane */}
         <div className="ghd__diff">
           {diffText ? (
-            <pre className="diff__body">
-              {diffText.split('\n').map((line, i) => (
-                <div key={i} className={classify(line)}>
-                  {line || ' '}
-                </div>
-              ))}
-            </pre>
+            <DiffView text={diffText} />
           ) : (
             <div className="ghd__diff-empty">
               {tab === 'changes' ? 'Select a file to see its changes' : 'Select a commit'}

@@ -20,17 +20,22 @@ export type AgentMetrics = { turns: number; activeMs: number; costUsd?: number }
 type StatusState = {
   status: Record<string, AgentStatus>
   metrics: Record<string, AgentMetrics>
+  /** the most recent meaningful line of each agent's output (for the roster) */
+  lastLine: Record<string, string>
   setStatus: (id: string, s: AgentStatus) => void
   /** record one working→idle turn that lasted `ms` */
   recordTurn: (id: string, ms: number) => void
   /** latest cost (USD) scraped from `/cost` output */
   setCost: (id: string, usd: number) => void
+  /** stash the latest output line shown next to the agent in the roster */
+  setLastLine: (id: string, line: string) => void
   clear: (id: string) => void
 }
 
 export const useAgents = create<StatusState>((set) => ({
   status: {},
   metrics: {},
+  lastLine: {},
   setStatus: (id, s) =>
     set((st) =>
       st.status[id] === s ? st : { status: { ...st.status, [id]: s } },
@@ -51,14 +56,20 @@ export const useAgents = create<StatusState>((set) => ({
       if (m.costUsd === usd) return st
       return { metrics: { ...st.metrics, [id]: { ...m, costUsd: usd } } }
     }),
+  setLastLine: (id, line) =>
+    set((st) =>
+      st.lastLine[id] === line ? st : { lastLine: { ...st.lastLine, [id]: line } },
+    ),
   clear: (id) =>
     set((st) => {
-      if (!(id in st.status) && !(id in st.metrics)) return st
+      if (!(id in st.status) && !(id in st.metrics) && !(id in st.lastLine)) return st
       const status = { ...st.status }
       const metrics = { ...st.metrics }
+      const lastLine = { ...st.lastLine }
       delete status[id]
       delete metrics[id]
-      return { status, metrics }
+      delete lastLine[id]
+      return { status, metrics, lastLine }
     }),
 }))
 
@@ -96,6 +107,18 @@ export function sendTo(id: string, data: string): boolean {
   if (!t) return false
   t.send(data)
   return true
+}
+
+/**
+ * Deliver a prompt to a live agent/terminal. Multi-line text is wrapped in a
+ * bracketed-paste sequence so Claude's TUI ingests every line as one block
+ * (a bare \n would submit the first line early). `submit` appends Enter.
+ * Returns false if the session isn't connected.
+ */
+export function sendPrompt(id: string, text: string, submit = true): boolean {
+  const body = text.replace(/\r/g, '').replace(/\n+$/, '')
+  const wrapped = body.includes('\n') ? `\x1b[200~${body}\x1b[201~` : body
+  return sendTo(id, submit ? `${wrapped}\r` : wrapped)
 }
 
 // ---------- status classification from terminal output ----------

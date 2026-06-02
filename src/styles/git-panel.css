@@ -9,13 +9,15 @@
   background: var(--bg);
   min-height: 0;
 }
+
+/* ---------- header ---------- */
 .ghd__head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 7px 8px;
   border-bottom: 1px solid var(--line-soft);
-  background: var(--panel-2);
+  background: linear-gradient(var(--panel-2), var(--panel));
   flex-shrink: 0;
 }
 .ghd__repo {
@@ -28,8 +30,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  padding: 0 9px;
+  height: 27px;
+  padding: 0 10px;
   max-width: 220px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -37,12 +39,15 @@
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 11.5px;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
 .ghd__branch:hover {
   border-color: var(--line-hard);
+  background: var(--panel-hi);
 }
 .ghd__branch-ico {
   color: var(--ink-faint);
+  font-size: 13px;
 }
 .ghd__branch-name {
   white-space: nowrap;
@@ -57,8 +62,8 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
-  height: 26px;
-  padding: 0 11px;
+  height: 27px;
+  padding: 0 12px;
   margin-left: auto;
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
@@ -67,6 +72,7 @@
   font-family: var(--font-mono);
   font-size: 11.5px;
   white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 .ghd__sync:hover:not(:disabled) {
   background: var(--accent);
@@ -80,6 +86,8 @@
   font-size: 10px;
   opacity: 0.85;
 }
+
+/* ---------- body split ---------- */
 .ghd__body {
   flex: 1;
   display: flex;
@@ -102,7 +110,7 @@
 }
 .ghd__tab {
   flex: 1;
-  height: 30px;
+  height: 31px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -113,6 +121,7 @@
   font-family: var(--font-mono);
   font-size: 11.5px;
   border-bottom: 2px solid transparent;
+  transition: color 0.12s ease, border-color 0.12s ease;
 }
 .ghd__tab:hover {
   color: var(--ink-dim);
@@ -123,16 +132,22 @@
 }
 .ghd__count {
   font-size: 9.5px;
-  padding: 0 5px;
+  min-width: 16px;
+  padding: 1px 5px;
   border-radius: 100px;
   background: var(--panel-hi);
   color: var(--ink-dim);
+  text-align: center;
+}
+.ghd__tab--on .ghd__count {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
 }
 .ghd__selectall {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 9px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--line-soft);
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -140,60 +155,93 @@
   flex-shrink: 0;
   cursor: pointer;
 }
+
+/* ---------- file / commit lists ---------- */
 .ghd__files,
 .ghd__commits {
   flex: 1;
   overflow: auto;
   min-height: 0;
+  padding: 3px 0;
 }
 .ghd__file {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 9px;
+  gap: 8px;
+  padding: 4px 10px;
   font-family: var(--font-mono);
   font-size: 11.5px;
   cursor: pointer;
+  border-left: 2px solid transparent;
 }
 .ghd__file:hover {
   background: var(--panel-hi);
 }
 .ghd__file--sel {
   background: var(--accent-soft);
+  border-left-color: var(--accent);
 }
+.ghd__file input[type='checkbox'],
+.ghd__selectall input[type='checkbox'] {
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+/* name bright, directory dimmed — name stays visible, directory truncates */
 .ghd__fname {
   flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.ghd__fname-name {
   color: var(--ink-dim);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.ghd__file--sel .ghd__fname-name,
+.ghd__file:hover .ghd__fname-name {
+  color: var(--ink);
+}
+.ghd__fname-dir {
+  color: var(--ink-faint);
+  font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
-}
-.ghd__file--sel .ghd__fname {
-  color: var(--ink);
+  min-width: 0;
 }
 .ghd__badge {
-  width: 14px;
-  text-align: center;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  font-size: 11px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
 }
 .ghd__badge--mod {
   color: var(--k-note);
+  background: rgba(216, 166, 87, 0.14);
 }
 .ghd__badge--new {
   color: #8bbf73;
+  background: rgba(139, 191, 115, 0.14);
 }
 .ghd__badge--del {
   color: #e8795a;
+  background: rgba(232, 121, 90, 0.14);
 }
+
+/* ---------- commit composer ---------- */
 .ghd__composer {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px;
+  padding: 9px 8px;
   border-top: 1px solid var(--line-soft);
   background: var(--panel-2);
 }
@@ -205,21 +253,27 @@
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 11.5px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   outline: none;
   user-select: text;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.ghd__summary::placeholder,
+.ghd__desc::placeholder {
+  color: var(--ink-faint);
 }
 .ghd__summary:focus,
 .ghd__desc:focus {
   border-color: var(--accent-line);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .ghd__desc {
   resize: none;
-  height: 46px;
-  line-height: 1.4;
+  height: 48px;
+  line-height: 1.45;
 }
 .ghd__commit {
-  height: 30px;
+  height: 31px;
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
   border-radius: var(--r-sm);
@@ -231,6 +285,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 0 8px;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 .ghd__commit:hover:not(:disabled) {
   background: var(--accent);
@@ -240,13 +295,19 @@
   opacity: 0.45;
   cursor: default;
 }
+
+/* ---------- history list ---------- */
 .ghd__commit-row {
-  padding: 6px 9px;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 7px 10px;
+  border-left: 2px solid transparent;
   cursor: pointer;
 }
 .ghd__commit-row:hover {
   background: var(--panel-hi);
+}
+.ghd__commit-row.ghd__file--sel {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
 }
 .ghd__commit-subj {
   display: block;
@@ -262,16 +323,18 @@
   font-family: var(--font-mono);
   font-size: 9.5px;
   color: var(--ink-faint);
-  margin-top: 2px;
+  margin-top: 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---------- diff pane ---------- */
 .ghd__diff {
   flex: 1;
   overflow: auto;
   min-height: 0;
-  background: #0a0b0d;
+  background: var(--bg);
 }
 .ghd__diff-empty {
   display: grid;
@@ -282,4 +345,32 @@
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-faint);
+}
+/* per-line diff styling scoped to the git panel: a continuous colored gutter on
+   changed lines, a distinct bar for hunk headers, dimmed file metadata. */
+.ghd__diff .diff__body {
+  padding: 6px 0;
+  tab-size: 2;
+}
+.ghd__diff .diff__body > div {
+  padding: 0 10px 0 12px;
+}
+.ghd__diff .diff__meta {
+  color: var(--ink-faint);
+  opacity: 0.85;
+}
+.ghd__diff .diff__hunk {
+  color: var(--k-web);
+  background: rgba(109, 181, 168, 0.08);
+  margin: 2px 0;
+}
+.ghd__diff .diff__add {
+  color: #b6d99a;
+  background: rgba(139, 191, 115, 0.1);
+  box-shadow: inset 3px 0 0 rgba(139, 191, 115, 0.55);
+}
+.ghd__diff .diff__del {
+  color: #f0a08c;
+  background: rgba(232, 121, 90, 0.1);
+  box-shadow: inset 3px 0 0 rgba(232, 121, 90, 0.55);
 }

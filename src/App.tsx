@@ -16,6 +16,12 @@ import { AgentWizard } from './ui/AgentWizard'
 import { AttentionBar } from './ui/AttentionBar'
 import { Presentation } from './ui/Presentation'
 import { ContextMenuHost, isEditableTarget } from './ui/ContextMenu'
+import { Roster } from './ui/Roster'
+import { PromptLibrary } from './ui/PromptLibrary'
+import { Checkpoints } from './ui/Checkpoints'
+import { CanvasSearch } from './ui/CanvasSearch'
+import { TrackingBar } from './ui/TrackingBar'
+import { FollowController } from './ui/FollowController'
 
 // topbar (44) + tabs (38); keep in sync with --topbar-h / --tabs-h in global.css
 const CHROME_H = 82
@@ -43,6 +49,7 @@ function worldCenter() {
 
 export default function App() {
   const tool = useStore((s) => s.tool)
+  const openPanel = useStore((s) => s.openPanel)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -74,6 +81,13 @@ export default function App() {
       if (mod && key === 'k') {
         e.preventDefault()
         store.setPaletteOpen(true)
+        return
+      }
+      // ⌘F opens canvas search — but only when not typing into a field or a
+      // widget that owns find itself (Monaco editor, the terminal)
+      if (mod && key === 'f' && !editing) {
+        e.preventDefault()
+        store.setSearchOpen(true)
         return
       }
       if (mod && key === 'z') {
@@ -233,13 +247,19 @@ export default function App() {
         <Props />
         <SelectionBar />
         <AttentionBar />
+        <TrackingBar />
         <Minimap />
         <Hud />
         <CommandPalette />
+        <CanvasSearch />
         <AgentWizard />
         <Presentation />
+        {openPanel === 'roster' && <Roster />}
+        {openPanel === 'prompts' && <PromptLibrary />}
+        {openPanel === 'checkpoints' && <Checkpoints />}
       </main>
       <ContextMenuHost />
+      <FollowController />
     </div>
   )
 }

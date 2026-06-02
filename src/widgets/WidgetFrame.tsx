@@ -23,8 +23,9 @@ import {
   IconDatabase,
   IconData,
   IconPlot,
+  IconChat,
 } from '../ui/icons'
-import { useAgents, sendTo, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
+import { useAgents, sendTo, sendPrompt, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
 import { NoteBody } from './NoteBody'
 import { WebBody } from './WebBody'
 import { TerminalBody } from './TerminalBody'
@@ -40,6 +41,7 @@ import { RunnerBody } from './RunnerBody'
 import { SqlBody } from './SqlBody'
 import { DataBody } from './DataBody'
 import { PlotBody } from './PlotBody'
+import { TranscriptBody } from './TranscriptBody'
 
 const KIND_ICON: Record<WidgetKind, (p: { className?: string; size?: number }) => JSX.Element> = {
   terminal: IconTerminal,
@@ -58,6 +60,7 @@ const KIND_ICON: Record<WidgetKind, (p: { className?: string; size?: number }) =
   sql: IconDatabase,
   data: IconData,
   plot: IconPlot,
+  transcript: IconChat,
 }
 
 const MIN_W = 220
@@ -104,7 +107,8 @@ export function WidgetFrame({
     el.kind === 'runner' ||
     el.kind === 'sql' ||
     el.kind === 'data' ||
-    el.kind === 'plot'
+    el.kind === 'plot' ||
+    el.kind === 'transcript'
   // notes are also single-click, but manage their own pointer handling
   // (toggle a checkbox vs. enter edit) so they don't use the generic capture
   const isNote = el.kind === 'note'
@@ -158,23 +162,34 @@ export function WidgetFrame({
     if (tool === 'select') e.stopPropagation()
   }
 
-  // drop a file (dragged from a file-tree widget) onto an agent/terminal to
-  // inject it as an @-mention context reference
+  // drop onto an agent/terminal to feed it context: a file (dragged from a
+  // file-tree or diff widget) becomes an @-mention; a prompt (from the prompt
+  // library) is pasted in as text. Both ride the same native DnD channel.
   const onBodyDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('application/x-ccanvas-file')) {
+    const t = e.dataTransfer.types
+    if (
+      t.includes('application/x-ccanvas-file') ||
+      t.includes('application/x-ccanvas-prompt')
+    ) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'copy'
     }
   }
   const onBodyDrop = (e: React.DragEvent) => {
     const path = e.dataTransfer.getData('application/x-ccanvas-file')
-    if (!path) return
+    const prompt = e.dataTransfer.getData('application/x-ccanvas-prompt')
+    if (!path && !prompt) return
     e.preventDefault()
     e.stopPropagation()
-    const base = el.cwd ? el.cwd.replace(/[\\/]+$/, '') : ''
-    let rel = base && path.startsWith(base) ? path.slice(base.length + 1) : path
-    rel = rel.replace(/\\/g, '/')
-    sendTo(el.id, `@${rel} `)
+    if (path) {
+      const base = el.cwd ? el.cwd.replace(/[\\/]+$/, '') : ''
+      let rel = base && path.startsWith(base) ? path.slice(base.length + 1) : path
+      rel = rel.replace(/\\/g, '/')
+      sendTo(el.id, `@${rel} `)
+    } else {
+      // paste the snippet without auto-submitting, so it can be reviewed/edited
+      sendPrompt(el.id, prompt, false)
+    }
     select()
     setActiveWidget(el.id)
   }
@@ -368,6 +383,7 @@ export function WidgetFrame({
         {el.kind === 'sql' && <SqlBody el={el} active={active} />}
         {el.kind === 'data' && <DataBody el={el} />}
         {el.kind === 'plot' && <PlotBody el={el} />}
+        {el.kind === 'transcript' && <TranscriptBody el={el} />}
 
         {shielded && (
           <div

@@ -10,7 +10,7 @@
 import type { ArrowElement, CanvasElement, WidgetElement, Workspace } from './types'
 import { useStore } from '../store/workspace'
 import { sendTo, isLive, stripAnsi, notify } from './agents'
-import { defaultDir, readFile, joinPath } from './backend'
+import { readTranscript, extractLastAssistant } from './transcript'
 
 // Heuristic keyword sets for the success/failure conditions. An agent that
 // needs a reliable signal should instead be told to end with a sentinel and
@@ -55,16 +55,8 @@ export function cleanAgentOutput(tail: string): string {
 }
 
 // ---------- session transcript (the model's actual last message) ----------
-// Claude Code persists each session as JSONL under
-//   <home>/.claude/projects/<cwd-with-non-alnum-→-dashes>/<sessionId>.jsonl
-// Reading it gives the model's real assistant output, free of terminal chrome.
-
-let homeDir: string | null | undefined // cached after first lookup
-
-/** Encode a working directory the way Claude Code names its project folder. */
-function encodeProject(cwd: string): string {
-  return cwd.replace(/[^a-zA-Z0-9]/g, '-')
-}
+// Reading the agent's transcript gives the model's real assistant output, free
+// of terminal chrome. The location + parsing live in lib/transcript.ts.
 
 /**
  * The text of the source agent's most recent assistant turn, pulled from its
@@ -72,46 +64,9 @@ function encodeProject(cwd: string): string {
  * Returns null if the transcript can't be read (no backend, unknown path, etc.).
  */
 async function readLastAssistant(source: WidgetElement): Promise<string | null> {
-  if (!source.sessionId || !source.cwd) return null
-  if (homeDir === undefined) homeDir = await defaultDir()
-  if (!homeDir) return null
-  const path = joinPath(
-    joinPath(joinPath(joinPath(homeDir, '.claude'), 'projects'), encodeProject(source.cwd)),
-    `${source.sessionId}.jsonl`,
-  )
-  const content = await readFile(path)
+  const content = await readTranscript(source.cwd, source.sessionId)
   if (!content) return null
   return extractLastAssistant(content)
-}
-
-/** Walk a transcript from the end, gathering the final turn's assistant text. */
-export function extractLastAssistant(jsonl: string): string | null {
-  const lines = jsonl.split('\n')
-  const parts: string[] = []
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const ln = lines[i].trim()
-    if (!ln) continue
-    let ev: { type?: string; message?: { content?: unknown } }
-    try {
-      ev = JSON.parse(ln)
-    } catch {
-      continue
-    }
-    // a user message or tool result marks the start of this turn — stop
-    if (ev.type === 'user') break
-    if (ev.type !== 'assistant') continue
-    const content = ev.message?.content
-    let text = ''
-    if (typeof content === 'string') text = content
-    else if (Array.isArray(content))
-      text = content
-        .filter((c): c is { type: string; text: string } => !!c && c.type === 'text')
-        .map((c) => c.text)
-        .join('\n')
-    if (text.trim()) parts.unshift(text.trim())
-  }
-  const out = parts.join('\n\n').trim()
-  return out || null
 }
 
 /** True if an edge's resolved text would embed the source's output. */

@@ -280,8 +280,29 @@ export function Canvas() {
         items.push({ separator: true })
       }
     }
-    // an agent → toggle a labelled box (name centred above the window)
+    // an agent → tracking camera, transcript, and a labelled box
     if (lone?.type === 'widget' && (lone as WidgetElement).kind === 'agent') {
+      const agent = lone as WidgetElement
+      const tracking = useStore.getState().trackingAgentId === agent.id
+      items.push({
+        label: tracking ? 'Stop tracking camera' : 'Track this agent (orbit its files)',
+        onClick: () =>
+          tracking ? s().stopTrackingAgent(false) : void s().startTrackingAgent(agent.id),
+      })
+      if (tracking)
+        items.push({
+          label: 'Stop tracking & clear orbit',
+          onClick: () => s().stopTrackingAgent(true),
+        })
+      items.push({
+        label: 'Open transcript',
+        onClick: () =>
+          s().spawnWidget('transcript', agent.x + agent.w + 360, agent.y + 120, {
+            agentId: agent.id,
+            cwd: agent.cwd,
+            title: `${agent.title} · transcript`,
+          }),
+      })
       const boxed = ws.elements.some((e) => e.labelFor === lone.id)
       items.push({
         label: boxed ? 'Remove label box' : 'Label box',

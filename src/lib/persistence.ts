@@ -1,9 +1,10 @@
-import type { CcnvsFile, Template, Workspace } from './types'
+import type { CcnvsFile, Prompt, Template, Workspace } from './types'
 import { DEFAULT_CAMERA } from './types'
 import { newId } from './id'
 
 const SESSION_KEY = 'ccanvas:session:v1'
 const TEMPLATES_KEY = 'ccanvas:templates:v1'
+const PROMPTS_KEY = 'ccanvas:prompts:v1'
 
 // File System Access API handles are not serializable; keep them in memory
 // keyed by workspace id so "Save" can write back to the same file.
@@ -163,6 +164,27 @@ export function loadTemplates(): Template[] {
 export function saveTemplates(templates: Template[]) {
   try {
     localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates))
+  } catch {
+    /* quota / private mode: ignore */
+  }
+}
+
+// ---------- prompt library (localStorage) ----------
+
+export function loadPrompts(): Prompt[] {
+  try {
+    const raw = localStorage.getItem(PROMPTS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as Prompt[]) : []
+  } catch {
+    return []
+  }
+}
+
+export function savePrompts(prompts: Prompt[]) {
+  try {
+    localStorage.setItem(PROMPTS_KEY, JSON.stringify(prompts))
   } catch {
     /* quota / private mode: ignore */
   }

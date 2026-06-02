@@ -4,7 +4,21 @@ import { screenToWorld } from '../lib/geometry'
 import { elementBounds } from '../lib/geometry'
 import { downloadPng, downloadSvg } from '../lib/export'
 import { runCommand, joinPath } from '../lib/backend'
+import { sendPrompt, isLive } from '../lib/agents'
 import type { WidgetKind } from '../lib/types'
+
+/** The focused/selected agent or terminal a prompt insert should target. */
+function injectTargetId(): string | null {
+  const s = useStore.getState()
+  const ws = selectActive(s)
+  const byId = new Map(ws.elements.map((e) => [e.id, e]))
+  const ok = (id?: string | null) => {
+    const el = id ? byId.get(id) : undefined
+    return !!el && el.type === 'widget' && (el.kind === 'agent' || el.kind === 'terminal')
+  }
+  if (ok(s.activeWidgetId)) return s.activeWidgetId
+  return s.selection.find((id) => ok(id)) ?? null
+}
 
 const CHROME_H = 82
 const worldCenter = () =>
@@ -190,6 +204,38 @@ export function CommandPalette() {
         run: () => s.setFlowsEnabled(!s.flowsEnabled),
       },
       {
+        id: 'panel-roster',
+        label: 'Agent roster',
+        group: 'Panels',
+        run: () => s.setOpenPanel('roster'),
+      },
+      {
+        id: 'panel-prompts',
+        label: 'Prompt library',
+        group: 'Panels',
+        run: () => s.setOpenPanel('prompts'),
+      },
+      {
+        id: 'panel-checkpoints',
+        label: 'Checkpoints',
+        group: 'Panels',
+        run: () => s.setOpenPanel('checkpoints'),
+      },
+      {
+        id: 'search-canvas',
+        label: 'Search this canvas',
+        hint: '⌘F',
+        group: 'View',
+        run: () => s.setSearchOpen(true),
+      },
+      {
+        id: 'follow-toggle',
+        label: s.followAgent ? 'Stop following the active agent' : 'Follow the active agent',
+        hint: s.followAgent ? 'on' : 'off',
+        group: 'View',
+        run: () => s.setFollowAgent(!s.followAgent),
+      },
+      {
         id: 'tpl-save',
         label: 'Save widget layout as template…',
         group: 'Templates',
@@ -210,6 +256,24 @@ export function CommandPalette() {
         run: () => {
           const w = worldCenter()
           s.applyTemplate(t.id, w.x, w.y)
+        },
+      })
+
+    // prompt library → insert into the focused agent
+    for (const p of s.prompts)
+      out.push({
+        id: `prompt-${p.id}`,
+        label: `Insert prompt: ${p.name}`,
+        hint: 'agent',
+        group: 'Prompts',
+        run: () => {
+          const id = injectTargetId()
+          if (id && isLive(id)) {
+            sendPrompt(id, p.text, false)
+            s.setActiveWidget(id)
+          } else {
+            s.setOpenPanel('prompts')
+          }
         },
       })
 

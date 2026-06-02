@@ -18,7 +18,7 @@ import {
   ensureNotifyPermission,
   notify,
 } from '../lib/agents'
-import { onAgentTurnComplete } from '../lib/flow'
+import { onAgentTurnComplete, cleanAgentOutput } from '../lib/flow'
 
 type Mode = 'connecting' | 'pty' | 'local'
 
@@ -475,6 +475,11 @@ export function TerminalBody({
       idleTimer = setTimeout(() => {
         const waiting = looksLikePrompt(tail)
         setAgentStatus(el.id, waiting ? 'waiting' : 'idle')
+        // surface the last meaningful line for the agent roster
+        if (isAgent) {
+          const last = cleanAgentOutput(tail).split('\n').filter(Boolean).pop()
+          if (last) useAgents.getState().setLastLine(el.id, last.slice(0, 160))
+        }
         // ping when an agent goes quiet while you're looking elsewhere
         if (
           wasWorking &&
