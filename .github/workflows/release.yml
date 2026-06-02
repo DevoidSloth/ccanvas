@@ -82,6 +82,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Bundling the Monaco + hdf5 wasm chunks OOMs Node's default heap on
+          # the ~7 GB macOS runner; raise it so `npm run build` doesn't crash.
+          NODE_OPTIONS: --max-old-space-size=6144
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: 'ccanvas __VERSION__'
