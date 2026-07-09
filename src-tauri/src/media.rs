@@ -36,7 +36,9 @@ fn quiet(_cmd: &mut Command) {}
 pub fn has_ffmpeg() -> bool {
     *HAS_FFMPEG.get_or_init(|| {
         let mut cmd = Command::new(ffprobe_bin());
-        cmd.arg("-version").stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.arg("-version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         quiet(&mut cmd);
         cmd.status().map(|s| s.success()).unwrap_or(false)
     })
@@ -78,7 +80,11 @@ fn handle(stream: TcpStream) -> std::io::Result<()> {
     if reader.read_line(&mut request_line)? == 0 {
         return Ok(());
     }
-    let target = request_line.split_whitespace().nth(1).unwrap_or("").to_string();
+    let target = request_line
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("")
+        .to_string();
 
     // consume headers, capturing Range
     let mut range: Option<String> = None;
@@ -208,12 +214,20 @@ fn serve_probe(w: &mut TcpStream, query: &str) -> std::io::Result<()> {
     };
     let empty = "{\"duration\":null,\"hasVideo\":false,\"format\":null,\"video\":null,\"audio\":null,\"streams\":[]}";
     let mut cmd = Command::new(ffprobe_bin());
-    cmd.args(["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams"])
-        .arg(&path)
-        .stderr(Stdio::null());
+    cmd.args([
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+    ])
+    .arg(&path)
+    .stderr(Stdio::null());
     quiet(&mut cmd);
     let json = match cmd.output() {
-        Ok(o) if o.status.success() => match serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+        Ok(o) if o.status.success() => match serde_json::from_slice::<serde_json::Value>(&o.stdout)
+        {
             Ok(v) => summarize_probe(&v).to_string(),
             Err(_) => empty.to_string(),
         },
@@ -259,7 +273,10 @@ fn summarize_probe(v: &serde_json::Value) -> serde_json::Value {
     };
 
     let lang = |s: &serde_json::Value| -> Option<String> {
-        s.get("tags").and_then(|t| t.get("language")).and_then(|x| x.as_str()).map(|x| x.to_string())
+        s.get("tags")
+            .and_then(|t| t.get("language"))
+            .and_then(|x| x.as_str())
+            .map(|x| x.to_string())
     };
     let duration = num(fmt.and_then(|f| f.get("duration")));
     let vid = find("video");
@@ -324,7 +341,11 @@ fn summarize_probe(v: &serde_json::Value) -> serde_json::Value {
                     if let Some(l) = lang(s) {
                         bits.push(format!("[{l}]"));
                     }
-                    if let Some(title) = s.get("tags").and_then(|t| t.get("title")).and_then(|x| x.as_str()) {
+                    if let Some(title) = s
+                        .get("tags")
+                        .and_then(|t| t.get("title"))
+                        .and_then(|x| x.as_str())
+                    {
                         bits.push(format!("\"{title}\""));
                     }
                     if let Some(cl) = s.get("channel_layout").and_then(|x| x.as_str()) {
@@ -380,14 +401,37 @@ fn serve_transcode(w: &mut TcpStream, query: &str) -> std::io::Result<()> {
     }
     cmd.arg("-i").arg(&path);
     cmd.args([
-        "-map", "0:v:0?", "-map", "0:a:0?", "-sn", "-dn",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-        "-vf", "scale='min(1920,iw)':-2",
-        "-c:a", "aac", "-b:a", "160k", "-ac", "2",
-        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-        "-f", "mp4", "pipe:1",
+        "-map",
+        "0:v:0?",
+        "-map",
+        "0:a:0?",
+        "-sn",
+        "-dn",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-vf",
+        "scale='min(1920,iw)':-2",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
+        "-ac",
+        "2",
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof",
+        "-f",
+        "mp4",
+        "pipe:1",
     ]);
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     quiet(&mut cmd);
 
     let mut child = match cmd.spawn() {
@@ -445,18 +489,16 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
-                match (hex(bytes[i + 1]), hex(bytes[i + 2])) {
-                    (Some(h), Some(l)) => {
-                        out.push(h * 16 + l);
-                        i += 3;
-                    }
-                    _ => {
-                        out.push(bytes[i]);
-                        i += 1;
-                    }
+            b'%' if i + 2 < bytes.len() => match (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                (Some(h), Some(l)) => {
+                    out.push(h * 16 + l);
+                    i += 3;
                 }
-            }
+                _ => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            },
             b'+' => {
                 out.push(b' ');
                 i += 1;

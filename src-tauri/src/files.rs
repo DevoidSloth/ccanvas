@@ -93,7 +93,10 @@ pub fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
             DirEntry {
                 name: e.file_name().to_string_lossy().to_string(),
                 path: p.to_string_lossy().to_string(),
-                is_dir: meta.as_ref().map(|m| m.is_dir()).unwrap_or_else(|| p.is_dir()),
+                is_dir: meta
+                    .as_ref()
+                    .map(|m| m.is_dir())
+                    .unwrap_or_else(|| p.is_dir()),
                 mtime,
             }
         })
