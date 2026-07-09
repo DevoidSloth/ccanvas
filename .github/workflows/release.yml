@@ -57,7 +57,8 @@ jobs:
             build-essential \
             curl wget file \
             libxdo-dev \
-            libssl-dev
+            libssl-dev \
+            libfuse2
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -85,6 +86,10 @@ jobs:
           # Bundling the Monaco + hdf5 wasm chunks OOMs Node's default heap on
           # the ~7 GB macOS runner; raise it so `npm run build` doesn't crash.
           NODE_OPTIONS: --max-old-space-size=6144
+          # linuxdeploy is itself an AppImage; the ubuntu-22.04 runner has no
+          # FUSE, so tell it to extract-and-run instead of mounting (otherwise
+          # "failed to run linuxdeploy" during AppImage bundling).
+          APPIMAGE_EXTRACT_AND_RUN: 1
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: 'ccanvas __VERSION__'
