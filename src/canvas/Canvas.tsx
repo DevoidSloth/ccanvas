@@ -57,7 +57,7 @@ const BINDABLE = new Set(['widget', 'image', 'frame', 'rect', 'ellipse', 'text']
 // ---- quick-insert (Space) commands ----
 type QuickCommand = {
   name: string // canonical command shown in the menu
-  target: WidgetKind | 'text'
+  target: WidgetKind
   desc: string
   aliases?: string[]
 }
@@ -77,12 +77,12 @@ const QUICK_COMMANDS: QuickCommand[] = [
   { name: 'issues', target: 'issues', desc: 'github issues', aliases: ['issue'] },
   { name: 'actions', target: 'runs', desc: 'github actions / CI', aliases: ['runs', 'ci', 'gh'] },
   { name: 'web', target: 'web', desc: 'web preview', aliases: ['url', 'preview', 'browser'] },
+  { name: 'video', target: 'video', desc: 'video player', aliases: ['movie', 'mp4', 'clip'] },
   { name: 'note', target: 'note', desc: 'markdown note', aliases: ['md', 'markdown'] },
-  { name: 'text', target: 'text', desc: 'text label', aliases: ['t'] },
 ]
 
 // every trigger word (canonical + aliases) → target
-const COMMAND_MAP: Record<string, WidgetKind | 'text'> = Object.fromEntries(
+const COMMAND_MAP: Record<string, WidgetKind> = Object.fromEntries(
   QUICK_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])].map((w) => [w, c.target])),
 )
 
@@ -866,58 +866,37 @@ export function Canvas() {
     reader.readAsDataURL(file)
   }
 
-  // ---- quick insert ----
-  const insertText = (text: string, world: Point) => {
-    beginHistory()
-    const id = newId()
-    addElement({ id, type: 'text', x: world.x, y: world.y - 9, text, color, fontSize: 18, z: 0 })
-    if (!text) setEditingText(id)
-  }
-
+  // ---- quick insert (command launcher; leading slash optional) ----
   const handleInsert = (value: string, at: Point) => {
     const v = value.trim()
+    if (!v) return
     const world = screenToWorld(at, cam)
-    if (!v) {
-      insertText('', world)
+    const body = v.startsWith('/') ? v.slice(1) : v
+    const [head, ...restArr] = body.split(/\s+/)
+    const rest = restArr.join(' ')
+    const target = COMMAND_MAP[head.toLowerCase()]
+    if (!target) return // unknown command → do nothing
+    if (target === 'agent') {
+      openAgentWizard({ x: world.x, y: world.y, agentPrompt: rest || undefined })
       return
     }
-    if (v.startsWith('/')) {
-      const [head, ...restArr] = v.slice(1).split(/\s+/)
-      const rest = restArr.join(' ')
-      const target = COMMAND_MAP[head.toLowerCase()]
-      if (target === 'text') {
-        insertText(rest, world)
-        return
-      }
-      if (target === 'agent') {
-        openAgentWizard({ x: world.x, y: world.y, agentPrompt: rest || undefined })
-        return
-      }
-      if (target) {
-        const init: Partial<WidgetElement> = {}
-        if (
-          rest &&
-          (target === 'editor' ||
-            target === 'doc' ||
-            target === 'log' ||
-            target === 'data' ||
-            target === 'plot')
-        )
-          init.path = rest
-        if (rest && target === 'web') init.url = rest
-        if (rest && target === 'runner') init.cmd = rest
-        const id = spawnWidget(target, world.x, world.y, init)
-        if (rest && target === 'note')
-          mutateElement(id, (w) => {
-            ;(w as WidgetElement).note = rest
-          })
-        return
-      }
-      // unknown command → drop it as literal text
-      insertText(v, world)
-      return
-    }
-    insertText(v, world)
+    const init: Partial<WidgetElement> = {}
+    if (
+      rest &&
+      (target === 'editor' ||
+        target === 'doc' ||
+        target === 'log' ||
+        target === 'data' ||
+        target === 'plot')
+    )
+      init.path = rest
+    if (rest && target === 'web') init.url = rest
+    if (rest && target === 'runner') init.cmd = rest
+    const id = spawnWidget(target, world.x, world.y, init)
+    if (rest && target === 'note')
+      mutateElement(id, (w) => {
+        ;(w as WidgetElement).note = rest
+      })
   }
 
   // screen-space selection rectangles for selected ink (widgets show their own border)
@@ -1275,17 +1254,17 @@ function QuickInsert({
     ref.current?.focus()
   }, [])
 
-  // show the menu while typing a command token (slash + no space yet)
-  const tokenMatch = /^\/(\S*)$/.exec(value)
+  // show the menu while typing a command token (optional leading slash, no space yet)
+  const tokenMatch = /^\/?(\S+)$/.exec(value)
   const matches = tokenMatch ? matchCommands(tokenMatch[1]) : []
   const active = matches.length ? Math.min(hi, matches.length - 1) : 0
 
   const choose = (cmd: QuickCommand, run: boolean) => {
     if (run) {
-      onSubmit('/' + cmd.name)
+      onSubmit(cmd.name)
     } else {
-      // complete to `/<name> ` and keep editing (e.g. to add args)
-      setValue('/' + cmd.name + ' ')
+      // complete to `<name> ` and keep editing (e.g. to add args)
+      setValue(cmd.name + ' ')
       setHi(0)
       ref.current?.focus()
     }
@@ -1323,7 +1302,7 @@ function QuickInsert({
       <input
         ref={ref}
         className="quick-insert__input"
-        placeholder="type to insert · / for commands"
+        placeholder="type a command — agent, term, files…"
         value={value}
         onChange={(e) => {
           setValue(e.target.value)

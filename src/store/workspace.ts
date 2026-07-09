@@ -89,6 +89,9 @@ const WIDGET_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   data: { w: 680, h: 460 },
   plot: { w: 520, h: 440 },
   transcript: { w: 460, h: 520 },
+  video: { w: 560, h: 380 },
+  mediainfo: { w: 340, h: 440 },
+  claude: { w: 1120, h: 720 },
 }
 const WIDGET_TITLE: Record<WidgetKind, string> = {
   terminal: 'terminal',
@@ -108,6 +111,9 @@ const WIDGET_TITLE: Record<WidgetKind, string> = {
   data: 'data',
   plot: 'figure',
   transcript: 'transcript',
+  video: 'video',
+  mediainfo: 'media info',
+  claude: 'claude workspace',
 }
 
 /** Expand a set of ids to include every sibling sharing a groupId. */
@@ -196,6 +202,8 @@ export type Store = {
 
   // ----- tabs -----
   newTab: () => Promise<void>
+  /** open a dedicated tab hosting the Claude knowledge-graph node map */
+  openClaudeWorkspace: () => void
   closeTab: (id: string) => void
   switchTab: (id: string) => void
   renameTab: (id: string, name: string) => void
@@ -350,6 +358,50 @@ export const useStore = create<Store>((set, get) => ({
     const realDir = dir || undefined
     const name = realDir ? baseName(realDir) : `untitled-${get().tabs.length + 1}`
     const ws = makeWorkspace(name, realDir)
+    set((s) => ({
+      tabs: [...s.tabs, ws],
+      activeTabId: ws.id,
+      selection: [],
+      activeWidgetId: null,
+    }))
+  },
+
+  // A special tab that hosts a single, locked "claude" widget filling the
+  // canvas — the Claude knowledge-graph node map (see ClaudeBody, which renders
+  // the bundled claude-graph.html). Reuses the active canvas's folder as cwd.
+  openClaudeWorkspace: () => {
+    // if one is already open, just switch to it
+    const existing = get().tabs.find((t) =>
+      t.elements.some((e) => e.type === 'widget' && (e as WidgetElement).kind === 'claude'),
+    )
+    if (existing) {
+      set({ activeTabId: existing.id, selection: [], activeWidgetId: null })
+      return
+    }
+    const dir = get().active()?.dir
+    const ws = makeWorkspace('claude', dir)
+    const { w, h } = WIDGET_SIZE.claude
+    const id = newId()
+    const el: WidgetElement = {
+      id,
+      type: 'widget',
+      kind: 'claude',
+      x: -w / 2,
+      y: -h / 2,
+      w,
+      h,
+      z: nextZ(),
+      title: WIDGET_TITLE.claude,
+      locked: true,
+      ...(dir ? { cwd: dir } : {}),
+    }
+    ws.elements = [el]
+    // frame the widget in the middle of the viewport, zoomed to fit
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
+    const vh = typeof window !== 'undefined' ? window.innerHeight - 82 : 720
+    const pad = 60
+    const zoom = clamp(Math.min(vw / (w + pad * 2), vh / (h + pad * 2)), 0.3, 1)
+    ws.camera = { zoom, x: vw / 2, y: vh / 2 }
     set((s) => ({
       tabs: [...s.tabs, ws],
       activeTabId: ws.id,
@@ -604,7 +656,7 @@ export const useStore = create<Store>((set, get) => ({
       h,
       z: 0,
       title: WIDGET_TITLE[kind],
-      ...(kind === 'web' ? { url: '' } : {}),
+      ...(kind === 'web' || kind === 'video' ? { url: '' } : {}),
       ...(kind === 'note'
         ? { note: '# notes\n\n- [ ] a task\n- [x] done\n\nclick to edit · click a box to check' }
         : {}),

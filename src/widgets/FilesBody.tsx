@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WidgetElement, WidgetKind } from '../lib/types'
 import { useStore } from '../store/workspace'
-import { widgetKindForFile } from '../lib/filetypes'
+import { widgetKindForFile, VIDEO_EXTENSIONS } from '../lib/filetypes'
 import {
   listDir,
   revealPath,
@@ -27,6 +27,7 @@ import {
   IconEditor,
   IconSettings,
   IconArchive,
+  IconVideo,
 } from '../ui/icons'
 import { openContextMenu, type MenuItem } from '../ui/ContextMenu'
 
@@ -47,7 +48,7 @@ const MAX_DIRS = 2000
 // ---------- filetype → icon + colour category ----------
 
 type FileCat =
-  | 'code' | 'markup' | 'data' | 'image' | 'doc'
+  | 'code' | 'markup' | 'data' | 'image' | 'video' | 'doc'
   | 'config' | 'archive' | 'db' | 'file'
 
 const set = (s: string) => new Set(s.split(' '))
@@ -55,6 +56,7 @@ const CODE = set('js mjs cjs jsx ts tsx py pyw pyi rb go rs java kt kts c h cc c
 const MARKUP = set('html htm xhtml css scss sass less styl vue svelte astro pug')
 const DATA = set('csv tsv tab json jsonc ndjson jsonl parquet pq parq h5 hdf5 hdf he5 arrow feather')
 const IMAGE = set('png jpg jpeg gif webp bmp svg avif ico tif tiff')
+const VIDEO = new Set(VIDEO_EXTENSIONS)
 const DOCEXT = set('md markdown mdx txt text rst adoc asciidoc tex rtf pdf log')
 const CONFIG = set('yaml yml toml ini cfg conf env lock editorconfig gitignore gitattributes dockerignore dockerfile npmrc nvmrc prettierrc eslintrc xml properties')
 const ARCHIVE = set('zip tar gz tgz bz2 xz zst 7z rar jar war')
@@ -70,6 +72,7 @@ function fileCategory(name: string): FileCat {
   if (MARKUP.has(ext)) return 'markup'
   if (DATA.has(ext)) return 'data'
   if (IMAGE.has(ext)) return 'image'
+  if (VIDEO.has(ext)) return 'video'
   if (DOCEXT.has(ext)) return 'doc'
   if (CONFIG.has(ext)) return 'config'
   if (ARCHIVE.has(ext)) return 'archive'
@@ -82,6 +85,7 @@ const CAT_ICON: Record<FileCat, (p: { size?: number }) => JSX.Element> = {
   markup: IconWeb,
   data: IconData,
   image: IconImage,
+  video: IconVideo,
   doc: IconDoc,
   config: IconSettings,
   archive: IconArchive,

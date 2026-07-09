@@ -11,6 +11,7 @@
 //   • GET  /pick-file   — native "open .ccnvs" dialog   → { path, content }
 //   • GET  /read?path=  — read a file (utf8)             → { content }
 //   • GET  /read-bytes? — read a file (base64 bytes)     → { b64 }
+//   • GET  /file?path=  — stream a file with Range support (video/audio)
 //   • POST /save        — write a file  { path, content }
 //
 // The canvas needs real folders/paths (for terminal cwd + where .ccnvs
@@ -19,8 +20,8 @@
 import os from 'node:os'
 import http from 'node:http'
 import nodePath from 'node:path'
-import { promises as fs } from 'node:fs'
-import { execFile } from 'node:child_process'
+import { promises as fs, createReadStream } from 'node:fs'
+import { execFile, spawn } from 'node:child_process'
 
 const PORT = 7531
 const HOST = '127.0.0.1'
@@ -44,6 +45,20 @@ const defaultShell =
     : process.env.CCANVAS_SHELL || process.env.SHELL || 'bash'
 
 const homeDir = process.env.HOME || process.env.USERPROFILE || process.cwd()
+
+// ffmpeg/ffprobe let us transcode any codec the webview can't decode into a
+// browser-playable stream. Detected once at startup (overridable via env).
+const ffmpegBin = process.env.CCANVAS_FFMPEG || 'ffmpeg'
+const ffprobeBin = process.env.CCANVAS_FFPROBE || 'ffprobe'
+let hasFfmpeg = false
+execFile(ffmpegBin, ['-version'], (err) => {
+  hasFfmpeg = !err
+  console.log(
+    hasFfmpeg
+      ? '\x1b[32m✓ ffmpeg found — video transcoding enabled\x1b[0m'
+      : '\x1b[33m! ffmpeg not found — exotic codecs will fall back to the system player (install ffmpeg to play them in-app)\x1b[0m',
+  )
+})
 
 // ---------- native file/folder dialogs ----------
 
@@ -237,6 +252,229 @@ async function claudeUsage() {
   return { hasData: true, activeTokens: bTok, resetMs: reset, dayTokens, messages: bMsg }
 }
 
+// Content-Type for a media path, by extension. Unknown → octet-stream (the
+// webview can still sniff many of these). Keeps the <video> src honest.
+const MEDIA_TYPES = {
+  mp4: 'video/mp4', m4v: 'video/mp4', m4p: 'video/mp4',
+  webm: 'video/webm',
+  ogv: 'video/ogg', ogg: 'video/ogg',
+  mov: 'video/quicktime', qt: 'video/quicktime',
+  mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo',
+  wmv: 'video/x-ms-wmv', asf: 'video/x-ms-asf',
+  flv: 'video/x-flv', f4v: 'video/x-f4v',
+  mpg: 'video/mpeg', mpeg: 'video/mpeg', vob: 'video/mpeg',
+  mts: 'video/mp2t', m2ts: 'video/mp2t',
+  '3gp': 'video/3gpp', '3g2': 'video/3gpp2',
+  divx: 'video/divx',
+  m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac',
+}
+function mediaType(p) {
+  const ext = nodePath.extname(p).slice(1).toLowerCase()
+  return MEDIA_TYPES[ext] || 'application/octet-stream'
+}
+
+// Stream a file with HTTP Range support so the browser can seek and start
+// playback immediately instead of loading the whole thing into memory. This is
+// what makes video open fast and stops the app from OOM-crashing on big files.
+async function streamFile(req, res, p) {
+  let stat
+  try {
+    stat = await fs.stat(p)
+  } catch {
+    return send(res, 404, { error: 'not found' })
+  }
+  if (!stat.isFile()) return send(res, 400, { error: 'not a file' })
+  const total = stat.size
+  const type = mediaType(p)
+  const range = req.headers.range
+  const baseHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Content-Type': type,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-cache',
+  }
+  let start = 0
+  let end = total - 1
+  let status = 200
+  if (range) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim())
+    if (m) {
+      if (m[1]) start = parseInt(m[1], 10)
+      if (m[2]) end = parseInt(m[2], 10)
+      if (Number.isNaN(start)) start = 0
+      if (Number.isNaN(end) || end >= total) end = total - 1
+      if (start > end || start >= total) {
+        res.writeHead(416, { ...baseHeaders, 'Content-Range': `bytes */${total}` })
+        return res.end()
+      }
+      status = 206
+      baseHeaders['Content-Range'] = `bytes ${start}-${end}/${total}`
+    }
+  }
+  baseHeaders['Content-Length'] = end - start + 1
+  res.writeHead(status, baseHeaders)
+  if (req.method === 'HEAD') return res.end()
+  const stream = createReadStream(p, { start, end })
+  stream.on('error', () => {
+    if (!res.headersSent) res.writeHead(500)
+    res.end()
+  })
+  req.on('close', () => stream.destroy())
+  stream.pipe(res)
+}
+
+// Distil raw ffprobe JSON into the media-info shape the widget shows (codec,
+// resolution, fps, frame count, bitrate, audio, container …).
+const EMPTY_PROBE = { duration: null, hasVideo: false, format: null, video: null, audio: null, streams: [] }
+function summarizeProbe(j) {
+  const num = (x) => {
+    const n = Number(x)
+    return Number.isFinite(n) ? n : null
+  }
+  const fmt = j.format || {}
+  const streams = j.streams || []
+  const v = streams.find((s) => s.codec_type === 'video')
+  const a = streams.find((s) => s.codec_type === 'audio')
+  const fps = (s) => {
+    if (!s) return null
+    const r = s.avg_frame_rate && s.avg_frame_rate !== '0/0' ? s.avg_frame_rate : s.r_frame_rate
+    if (!r || r === '0/0') return null
+    const [n, d] = r.split('/').map(Number)
+    return d ? n / d : null
+  }
+  const duration = num(fmt.duration)
+  const video = v
+    ? {
+        codec: v.codec_name || null,
+        codecLong: v.codec_long_name || null,
+        profile: v.profile || null,
+        level: v.level != null && v.level > 0 ? v.level : null,
+        width: v.width || null,
+        height: v.height || null,
+        codedWidth: v.coded_width || null,
+        codedHeight: v.coded_height || null,
+        fps: fps(v),
+        frames: num(v.nb_frames),
+        pixFmt: v.pix_fmt || null,
+        bitDepth: num(v.bits_per_raw_sample),
+        bitRate: num(v.bit_rate),
+        aspect: v.display_aspect_ratio || null,
+        sar: v.sample_aspect_ratio || null,
+        colorSpace: v.color_space || null,
+        colorRange: v.color_range || null,
+        colorPrimaries: v.color_primaries || null,
+        colorTransfer: v.color_transfer || null,
+        fieldOrder: v.field_order || null,
+        language: v.tags?.language || null,
+      }
+    : null
+  if (video && !video.frames && video.fps && duration)
+    video.frames = Math.round(video.fps * duration)
+  const audio = a
+    ? {
+        codec: a.codec_name || null,
+        codecLong: a.codec_long_name || null,
+        profile: a.profile || null,
+        channels: a.channels || null,
+        channelLayout: a.channel_layout || null,
+        sampleRate: num(a.sample_rate),
+        bitsPerSample: num(a.bits_per_sample) || null,
+        bitRate: num(a.bit_rate),
+        language: a.tags?.language || null,
+      }
+    : null
+  // brief listing of every stream (mkv often has several audio/subtitle tracks)
+  const trackLabel = (s) => {
+    const bits = [s.codec_type, s.codec_name]
+    if (s.tags?.language) bits.push(`[${s.tags.language}]`)
+    if (s.tags?.title) bits.push(`"${s.tags.title}"`)
+    if (s.channel_layout) bits.push(s.channel_layout)
+    if (s.width) bits.push(`${s.width}×${s.height}`)
+    return bits.filter(Boolean).join(' ')
+  }
+  const streamList = streams.map((s) => ({
+    index: s.index,
+    type: s.codec_type || null,
+    codec: s.codec_name || null,
+    label: trackLabel(s),
+  }))
+  return {
+    duration,
+    hasVideo: !!v,
+    format: {
+      name: fmt.format_name || null,
+      longName: fmt.format_long_name || null,
+      bitRate: num(fmt.bit_rate),
+      size: num(fmt.size),
+      nbStreams: fmt.nb_streams || streamList.length || null,
+      startTime: num(fmt.start_time),
+      tags: fmt.tags || null,
+    },
+    video,
+    audio,
+    streams: streamList,
+  }
+}
+
+// ffprobe a media file → rich info (used for the scrubber duration in transcode
+// mode and for the widget's VLC-style info panel).
+function probeFile(res, p) {
+  execFile(
+    ffprobeBin,
+    ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', p],
+    { maxBuffer: 8 << 20 },
+    (err, stdout) => {
+      if (err) return send(res, 200, EMPTY_PROBE)
+      try {
+        return send(res, 200, summarizeProbe(JSON.parse(stdout)))
+      } catch {
+        return send(res, 200, EMPTY_PROBE)
+      }
+    },
+  )
+}
+
+// Transcode any input into a progressively-streamable fragmented MP4 (H.264/AAC)
+// that every webview can play. `start` (seconds) seeks by fast-forwarding the
+// decoder, which is how the widget scrubs a non-seekable live stream. We map
+// only the first video+audio stream so extras (mkv subtitles, data) can't break
+// the mp4 muxer.
+function transcodeFile(req, res, p, start) {
+  const args = []
+  if (start > 0) args.push('-ss', String(start))
+  args.push('-i', p)
+  args.push('-map', '0:v:0?', '-map', '0:a:0?', '-sn', '-dn')
+  args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p')
+  // keep very large frames within realtime-transcode reach
+  args.push('-vf', "scale='min(1920,iw)':-2")
+  args.push('-c:a', 'aac', '-b:a', '160k', '-ac', '2')
+  args.push('-movflags', 'frag_keyframe+empty_moov+default_base_moof')
+  args.push('-f', 'mp4', 'pipe:1')
+
+  let child
+  try {
+    child = spawn(ffmpegBin, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) {
+    return send(res, 500, { error: String(e?.message ?? e) })
+  }
+  res.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-cache',
+  })
+  child.stdout.pipe(res)
+  // surface real failures (missing binary, bad input) but don't spam decode logs
+  child.on('error', () => {
+    if (!res.headersSent) res.writeHead(500)
+    try { res.end() } catch { /* already closed */ }
+  })
+  child.on('close', () => { try { res.end() } catch { /* already closed */ } })
+  const kill = () => { try { child.kill('SIGKILL') } catch { /* gone */ } }
+  req.on('close', kill)
+  res.on('close', kill)
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
@@ -250,7 +488,7 @@ const server = http.createServer(async (req, res) => {
   try {
     switch (url.pathname) {
       case '/health':
-        return send(res, 200, { ok: true, platform: process.platform, home: homeDir })
+        return send(res, 200, { ok: true, platform: process.platform, home: homeDir, ffmpeg: hasFfmpeg })
       case '/default-dir':
         return send(res, 200, { path: homeDir })
       case '/usage':
@@ -278,6 +516,25 @@ const server = http.createServer(async (req, res) => {
         const p = url.searchParams.get('path')
         if (!p) return send(res, 400, { error: 'missing path' })
         return send(res, 200, { content: await fs.readFile(p, 'utf8') })
+      }
+      case '/file': {
+        // stream a local file (video/audio) with Range support — see streamFile
+        const p = url.searchParams.get('path')
+        if (!p) return send(res, 400, { error: 'missing path' })
+        return streamFile(req, res, p)
+      }
+      case '/probe': {
+        const p = url.searchParams.get('path')
+        if (!p) return send(res, 400, { error: 'missing path' })
+        return probeFile(res, p)
+      }
+      case '/transcode': {
+        // pipe an ffmpeg transcode so any codec plays in the webview
+        const p = url.searchParams.get('path')
+        if (!p) return send(res, 400, { error: 'missing path' })
+        if (!hasFfmpeg) return send(res, 501, { error: 'ffmpeg not installed' })
+        const start = Number(url.searchParams.get('start')) || 0
+        return transcodeFile(req, res, p, start)
       }
       case '/read-bytes': {
         const p = url.searchParams.get('path')

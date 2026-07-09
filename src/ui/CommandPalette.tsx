@@ -45,6 +45,7 @@ const SPAWNABLE: { kind: WidgetKind; label: string }[] = [
   { kind: 'issues', label: 'GitHub issues' },
   { kind: 'runs', label: 'GitHub Actions' },
   { kind: 'web', label: 'Web preview' },
+  { kind: 'video', label: 'Video player' },
   { kind: 'note', label: 'Note' },
 ]
 
@@ -180,6 +181,13 @@ export function CommandPalette() {
       { id: 'save-as', label: 'Save canvas as…', group: 'Canvas', run: () => void s.saveActive(true) },
       { id: 'open', label: 'Open .ccnvs…', hint: '⌘O', group: 'Canvas', run: () => void s.openFile() },
       { id: 'new', label: 'New canvas', hint: '⌘N', group: 'Canvas', run: () => void s.newTab() },
+      {
+        id: 'claude-workspace',
+        label: 'Open Claude workspace (knowledge-graph map)',
+        hint: 'tab',
+        group: 'Canvas',
+        run: () => s.openClaudeWorkspace(),
+      },
       { id: 'folder', label: 'Set canvas folder…', group: 'Canvas', run: () => void s.setActiveDir() },
       { id: 'png', label: 'Export as PNG', group: 'Canvas', run: () => void downloadPng(ws) },
       { id: 'svg', label: 'Export as SVG', group: 'Canvas', run: () => downloadSvg(ws) },

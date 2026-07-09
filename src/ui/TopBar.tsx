@@ -10,6 +10,7 @@ import {
   IconChat,
   IconHistory,
   IconFollow,
+  IconClaude,
 } from './icons'
 import { UsagePill } from './UsagePill'
 
@@ -25,6 +26,7 @@ export function TopBar() {
   const togglePanel = useStore((s) => s.togglePanel)
   const followAgent = useStore((s) => s.followAgent)
   const setFollowAgent = useStore((s) => s.setFollowAgent)
+  const openClaudeWorkspace = useStore((s) => s.openClaudeWorkspace)
 
   const agentCount = tabs.reduce(
     (n, t) => n + t.elements.filter((e) => e.type === 'widget' && e.kind === 'agent').length,
@@ -81,6 +83,13 @@ export function TopBar() {
           onClick={() => setFollowAgent(!followAgent)}
         >
           <IconFollow />
+        </button>
+        <button
+          className="tb-icon"
+          title="Claude workspace — open the knowledge-graph map in a new tab"
+          onClick={() => openClaudeWorkspace()}
+        >
+          <IconClaude />
         </button>
       </div>
 

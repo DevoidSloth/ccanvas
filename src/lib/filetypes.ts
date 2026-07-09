@@ -10,6 +10,17 @@ import { DATA_EXTENSIONS } from './dataformats'
 export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif']
 /** Everything the figure widget claims for routing/file dialogs (images + pdf). */
 export const PLOT_EXTENSIONS = [...IMAGE_EXTENSIONS, 'pdf']
+/**
+ * Video containers the video widget will try to play. The webview natively
+ * decodes a subset (mp4/h264, webm, ogg); the rest are attempted and, if the
+ * codec isn't supported, the widget offers to open them in the system player.
+ * ('ts' is deliberately excluded — it collides with TypeScript source files.)
+ */
+export const VIDEO_EXTENSIONS = [
+  'mp4', 'm4v', 'm4p', 'webm', 'ogv', 'ogg', 'mov', 'qt', 'mkv',
+  'avi', 'wmv', 'asf', 'flv', 'f4v', 'mpg', 'mpeg', 'vob',
+  'mts', 'm2ts', '3gp', '3g2', 'divx',
+]
 
 /**
  * Source/text/config extensions that open in the plain-text editor. The editor
@@ -37,12 +48,14 @@ export function widgetKindForFile(path: string): WidgetKind {
   const ext = extOf(path)
   if (DATA_EXTENSIONS.includes(ext)) return 'data'
   if (PLOT_EXTENSIONS.includes(ext)) return 'plot'
+  if (VIDEO_EXTENSIONS.includes(ext)) return 'video'
   return 'editor'
 }
 
 const OPENABLE = new Set<string>([
   ...DATA_EXTENSIONS,
   ...PLOT_EXTENSIONS,
+  ...VIDEO_EXTENSIONS,
   ...EDITOR_EXTENSIONS,
 ])
 

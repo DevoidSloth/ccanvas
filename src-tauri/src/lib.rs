@@ -1,5 +1,6 @@
 // ccanvas desktop backend (pty + native dialogs/fs)
 mod files;
+mod media;
 mod pty;
 mod usage;
 mod watch;
@@ -21,6 +22,9 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // start the embedded media server (range streaming + ffmpeg
+            // transcode) so the desktop app plays video with no external backend
+            media::start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,6 +39,7 @@ pub fn run() {
             files::open_external,
             files::reveal_path,
             files::home_dir,
+            media::media_info,
             usage::claude_usage,
             pty::pty_open,
             pty::pty_start,

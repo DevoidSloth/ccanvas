@@ -32,6 +32,9 @@ export type WidgetKind =
   | 'data'
   | 'plot'
   | 'transcript'
+  | 'video'
+  | 'mediainfo'
+  | 'claude'
 
 type Base = {
   id: string
@@ -275,6 +278,9 @@ export const WIDGET_ACCENT: Record<WidgetKind, string> = {
   data: '#7fc7c0',
   plot: '#e89bc8',
   transcript: '#b9a8e0',
+  video: '#e0708a',
+  mediainfo: '#e0899b',
+  claude: '#d98a5a',
 }
 
 /** Agent accent colours, each mapped to a valid Claude Code `/color` name. */

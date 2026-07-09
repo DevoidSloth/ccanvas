@@ -14,6 +14,12 @@ type Commit = { hash: string; author: string; date: string; subject: string }
 
 const US = '\x1f' // unit separator for git log fields
 
+// A diff (or a large untracked file shown as one big addition) can be hundreds
+// of thousands of lines. We render one <div> per line, so an unbounded diff used
+// to mount enough DOM to OOM the renderer and take the whole app down when the
+// panel simply auto-selected a big first file. Cap what we render/build.
+const MAX_DIFF_LINES = 5000
+
 function classify(line: string): string {
   if (/^diff --git|^index |^--- |^\+\+\+ |^new file|^deleted file|^rename /.test(line))
     return 'diff__meta'
@@ -34,7 +40,12 @@ function splitPath(p: string): { name: string; dir: string } {
 // the commit composer (or any unrelated state change) no longer re-splits the
 // text and re-reconciles every line div — the main source of the panel's lag.
 const DiffView = memo(function DiffView({ text }: { text: string }) {
-  const lines = useMemo(() => text.split('\n'), [text])
+  const { lines, hidden } = useMemo(() => {
+    const all = text.split('\n')
+    return all.length > MAX_DIFF_LINES
+      ? { lines: all.slice(0, MAX_DIFF_LINES), hidden: all.length - MAX_DIFF_LINES }
+      : { lines: all, hidden: 0 }
+  }, [text])
   return (
     <pre className="diff__body">
       {lines.map((line, i) => (
@@ -42,6 +53,11 @@ const DiffView = memo(function DiffView({ text }: { text: string }) {
           {line || ' '}
         </div>
       ))}
+      {hidden > 0 && (
+        <div className="diff__meta">
+          … diff truncated — {hidden.toLocaleString()} more lines not shown
+        </div>
+      )}
     </pre>
   )
 })
@@ -186,7 +202,11 @@ export function DiffBody({ el }: { el: WidgetElement }) {
           setFileDiff(
             content == null
               ? '(new file)'
-              : content.split('\n').map((l) => '+' + l).join('\n'),
+              : content
+                  .split('\n')
+                  .slice(0, MAX_DIFF_LINES)
+                  .map((l) => '+' + l)
+                  .join('\n'),
           )
         return
       }

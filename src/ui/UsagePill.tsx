@@ -55,31 +55,49 @@ export function UsagePill() {
 
   if (!u || !u.hasData) return null
 
-  const pct = limit > 0 ? Math.min(100, (u.activeTokens / limit) * 100) : 0
-  const hot = limit > 0 && pct >= 85
+  const hasLimit = limit > 0
+  const pct = hasLimit ? Math.min(100, (u.activeTokens / limit) * 100) : 0
+  const hot = hasLimit && pct >= 85
 
   return (
     <div className="usage" ref={ref}>
       <button
         className={`tb-btn usage__pill${hot ? ' usage__pill--hot' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title="Claude Code usage — current 5-hour window"
+        title={
+          hasLimit
+            ? 'Claude Code usage — % of your window budget used'
+            : 'Claude Code usage — set a window budget to see % used'
+        }
       >
-        {limit > 0 && (
+        {hasLimit && (
           <span className="usage__bar">
             <span className="usage__bar-fill" style={{ width: pct + '%' }} />
           </span>
         )}
-        <span className="usage__num">{fmtTokens(u.activeTokens)}</span>
+        {/* show % of the window budget used; without a budget there's nothing to
+            take a percentage of, so fall back to the raw token count */}
+        <span className="usage__num">
+          {hasLimit ? `${Math.round(pct)}%` : fmtTokens(u.activeTokens)}
+        </span>
         {u.resetMs && <span className="usage__reset">· {fmtCountdown(u.resetMs)}</span>}
       </button>
 
       {open && (
         <div className="usage__pop">
           <div className="usage__title">Claude usage</div>
+          {hasLimit && (
+            <div className="usage__row">
+              <span>Window used</span>
+              <b>{Math.round(pct)}%</b>
+            </div>
+          )}
           <div className="usage__row">
             <span>This 5h window</span>
-            <b>{fmtTokens(u.activeTokens)} tok</b>
+            <b>
+              {fmtTokens(u.activeTokens)}
+              {hasLimit ? ` / ${fmtTokens(limit)}` : ''} tok
+            </b>
           </div>
           {u.resetMs && (
             <div className="usage__row">
@@ -112,8 +130,8 @@ export function UsagePill() {
             <span className="usage__unit">M</span>
           </label>
           <div className="usage__hint">
-            Set your plan's per-window budget to show a fill bar. Read from Claude
-            Code's local session logs.
+            Set your plan's per-window token budget to show <b>% used</b> and a
+            fill bar. Read from Claude Code's local session logs.
           </div>
         </div>
       )}

@@ -379,6 +379,31 @@ export const IconSettings = (p: P) => (
   </S>
 )
 
+// Film frame with a play triangle — the video widget.
+export const IconVideo = (p: P) => (
+  <S {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M10 9l5 3-5 3V9z" fill="currentColor" stroke="none" />
+  </S>
+)
+
+// A ring of rays — the Claude workspace tab (echoes the app mark / agent star).
+export const IconClaude = (p: P) => (
+  <S {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M16.9 16.9l2.2 2.2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1" />
+  </S>
+)
+
+// Circled 'i' — the media-info widget.
+export const IconInfo = (p: P) => (
+  <S {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5" />
+    <circle cx="12" cy="7.6" r="1" fill="currentColor" stroke="none" />
+  </S>
+)
+
 // Speech bubble with lines — the agent transcript widget.
 export const IconChat = (p: P) => (
   <S {...p}>

@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type { WidgetElement } from '../lib/types'
 import { runCommand } from '../lib/backend'
+import { useGhJson } from '../lib/gh'
 import { IconReload } from '../ui/icons'
 
 // GitHub Actions widget. Lists recent workflow runs for the folder via `gh`,
-// with a live poll (status changes remotely), opening a run on click.
+// with a live poll (status changes remotely), opening a run on click. The load
+// goes through the shared gh runner, and the live poll is non-overlapping —
+// the next tick is scheduled only after the previous one returns, and pauses
+// while the tab is hidden — so a slow network can't stack up gh processes.
 
 type Run = {
   databaseId: number
@@ -32,59 +36,19 @@ function runState(r: Run): { glyph: string; cls: string; label: string } {
 
 export function RunsBody({ el }: { el: WidgetElement }) {
   const cwd = el.path || el.cwd || ''
-  const [runs, setRuns] = useState<Run[] | null>(null)
-  const [err, setErr] = useState<string | null>(null)
   const [live, setLive] = useState(false)
-  const [nonce, setNonce] = useState(0)
-
-  const load = useCallback(async () => {
-    if (!cwd) {
-      setErr('no folder bound')
-      return
-    }
-    const r = await runCommand(
-      'gh',
-      [
-        'run',
-        'list',
-        '--json',
-        'databaseId,displayTitle,status,conclusion,workflowName,headBranch',
-        '--limit',
-        '20',
-      ],
-      cwd,
-    )
-    if (!r) {
-      setErr('backend offline')
-      setRuns(null)
-      return
-    }
-    if (r.code !== 0) {
-      setErr(r.stderr.trim() || 'gh failed — is the GitHub CLI installed and authed?')
-      setRuns(null)
-      return
-    }
-    try {
-      setRuns(JSON.parse(r.stdout || '[]'))
-      setErr(null)
-    } catch {
-      setErr('could not parse gh output')
-      setRuns(null)
-    }
-  }, [cwd])
-
-  useEffect(() => {
-    void load()
-  }, [load, nonce])
-
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
-  useEffect(() => {
-    if (timer.current) clearInterval(timer.current)
-    if (live) timer.current = setInterval(() => void load(), 5000)
-    return () => {
-      if (timer.current) clearInterval(timer.current)
-    }
-  }, [live, load])
+  const { data: runs, error: err, loading, refresh } = useGhJson<Run[]>(
+    [
+      'run',
+      'list',
+      '--json',
+      'databaseId,displayTitle,status,conclusion,workflowName,headBranch',
+      '--limit',
+      '20',
+    ],
+    cwd,
+    { live, intervalMs: 5000 },
+  )
 
   const open = (id: number) => void runCommand('gh', ['run', 'view', String(id), '--web'], cwd)
 
@@ -100,13 +64,13 @@ export function RunsBody({ el }: { el: WidgetElement }) {
         >
           live
         </button>
-        <button className="diff__btn" title="Refresh" onClick={() => setNonce((n) => n + 1)}>
+        <button className="diff__btn" title="Refresh" onClick={refresh}>
           <IconReload />
         </button>
       </div>
       {err ? (
         <div className="diff__empty">{err}</div>
-      ) : runs == null ? (
+      ) : loading || runs == null ? (
         <div className="diff__empty">loading…</div>
       ) : runs.length === 0 ? (
         <div className="git__clean">no workflow runs</div>

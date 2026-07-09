@@ -4,7 +4,7 @@
 //   • Web     — the optional HTTP bridge (server/pty-server.mjs)
 // Everything degrades gracefully when neither is available.
 
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 const BASE = 'http://127.0.0.1:7531'
@@ -334,6 +334,151 @@ export async function openExternal(url: string): Promise<void> {
 /** URL that routes through the backend proxy (strips X-Frame-Options/CSP). */
 export function proxyUrl(target: string): string {
   return `${BASE}/proxy?url=${encodeURIComponent(target)}`
+}
+
+/**
+ * A streamable, range-request-capable URL for a local file path — used to play
+ * video/audio in a <video>/<audio> element WITHOUT loading the whole file into
+ * memory (which OOM-crashes on large media). Under Tauri this is the asset
+ * protocol (`convertFileSrc`); in web mode it's the backend's /file route.
+ * Returns null when no backend can serve local files.
+ */
+export function mediaUrl(path: string): string | null {
+  if (!path) return null
+  if (isTauri()) {
+    try {
+      return convertFileSrc(path)
+    } catch {
+      return null
+    }
+  }
+  return `${BASE}/file?path=${encodeURIComponent(path)}`
+}
+
+/**
+ * Where the video widget streams/transcodes from, and whether ffmpeg is there.
+ * `base` is the HTTP origin serving /file, /probe and /transcode:
+ *   • Tauri — the in-process media server (media.rs), started on app launch, so
+ *     the desktop app is fully self-contained (no `npm run server` needed).
+ *   • Web   — the Node backend on port 7531.
+ * Returns null when no backend can serve local media.
+ */
+export type MediaEndpoint = { base: string; ffmpeg: boolean }
+
+export async function mediaEndpoint(): Promise<MediaEndpoint | null> {
+  if (isTauri()) {
+    try {
+      const info = await invoke<{ url: string | null; ffmpeg: boolean }>('media_info')
+      return info?.url ? { base: info.url, ffmpeg: !!info.ffmpeg } : null
+    } catch {
+      return null
+    }
+  }
+  try {
+    const r = await httpGet<{ ok: boolean; ffmpeg?: boolean }>('/health', 800)
+    return r.ok ? { base: BASE, ffmpeg: !!r.ffmpeg } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Range-streaming URL for a local file on the media backend. Preferred over
+ * mediaUrl() when an endpoint is known, since it goes through the same
+ * (tested) server as transcode/probe rather than the asset protocol.
+ */
+export function fileStreamUrl(base: string, path: string): string {
+  return `${base}/file?path=${encodeURIComponent(path)}`
+}
+
+/**
+ * URL that transcodes a local file to browser-playable fMP4 (H.264/AAC) on the
+ * backend. `start` (seconds) seeks by fast-forwarding the decode.
+ */
+export function transcodeUrl(base: string, path: string, start = 0): string {
+  const q = start > 0 ? `&start=${Math.floor(start)}` : ''
+  return `${base}/transcode?path=${encodeURIComponent(path)}${q}`
+}
+
+/** Rich media metadata from ffprobe (drives the media-info widget). */
+export type MediaStream = {
+  index: number | null
+  type: string | null
+  codec: string | null
+  label: string
+}
+export type MediaInfo = {
+  duration: number | null
+  hasVideo: boolean
+  format: {
+    name: string | null
+    longName: string | null
+    bitRate: number | null
+    size: number | null
+    nbStreams: number | null
+    startTime: number | null
+    tags: Record<string, string> | null
+  } | null
+  video: {
+    codec: string | null
+    codecLong: string | null
+    profile: string | null
+    level: number | null
+    width: number | null
+    height: number | null
+    codedWidth: number | null
+    codedHeight: number | null
+    fps: number | null
+    frames: number | null
+    pixFmt: string | null
+    bitDepth: number | null
+    bitRate: number | null
+    aspect: string | null
+    sar: string | null
+    colorSpace: string | null
+    colorRange: string | null
+    colorPrimaries: string | null
+    colorTransfer: string | null
+    fieldOrder: string | null
+    language: string | null
+  } | null
+  audio: {
+    codec: string | null
+    codecLong: string | null
+    profile: string | null
+    channels: number | null
+    channelLayout: string | null
+    sampleRate: number | null
+    bitsPerSample: number | null
+    bitRate: number | null
+    language: string | null
+  } | null
+  streams: MediaStream[]
+}
+
+const EMPTY_MEDIA_INFO: MediaInfo = {
+  duration: null,
+  hasVideo: false,
+  format: null,
+  video: null,
+  audio: null,
+  streams: [],
+}
+
+/** ffprobe a media file for duration, codecs, resolution, frames, bitrate, … */
+export async function probeMedia(base: string, path: string): Promise<MediaInfo> {
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 6000)
+    const r = await fetch(`${base}/probe?path=${encodeURIComponent(path)}`, {
+      signal: ctrl.signal,
+    })
+    clearTimeout(timer)
+    if (!r.ok) return EMPTY_MEDIA_INFO
+    return { ...EMPTY_MEDIA_INFO, ...((await r.json()) as MediaInfo) }
+  } catch {
+    return EMPTY_MEDIA_INFO
+  }
 }
 
 /**

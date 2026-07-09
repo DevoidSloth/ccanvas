@@ -1,53 +1,23 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { WidgetElement } from '../lib/types'
 import { runCommand } from '../lib/backend'
+import { useGhJson } from '../lib/gh'
 import { IconReload } from '../ui/icons'
 
 // GitHub issues widget. Lists open issues for the folder via `gh`, opens one in
-// the browser on click, and creates a new one (gh issue create --web).
+// the browser on click, and creates a new one (gh issue create --web). Loads go
+// through the shared gh runner (cache + dedup + timeout).
 
 type Label = { name: string; color?: string }
 type Issue = { number: number; title: string; labels?: Label[] }
 
 export function IssuesBody({ el }: { el: WidgetElement }) {
   const cwd = el.path || el.cwd || ''
-  const [issues, setIssues] = useState<Issue[] | null>(null)
-  const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [nonce, setNonce] = useState(0)
-
-  const load = useCallback(async () => {
-    if (!cwd) {
-      setErr('no folder bound')
-      return
-    }
-    const r = await runCommand(
-      'gh',
-      ['issue', 'list', '--json', 'number,title,labels', '--limit', '40'],
-      cwd,
-    )
-    if (!r) {
-      setErr('backend offline')
-      setIssues(null)
-      return
-    }
-    if (r.code !== 0) {
-      setErr(r.stderr.trim() || 'gh failed — is the GitHub CLI installed and authed?')
-      setIssues(null)
-      return
-    }
-    try {
-      setIssues(JSON.parse(r.stdout || '[]'))
-      setErr(null)
-    } catch {
-      setErr('could not parse gh output')
-      setIssues(null)
-    }
-  }, [cwd])
-
-  useEffect(() => {
-    void load()
-  }, [load, nonce])
+  const { data: issues, error: err, loading, refresh } = useGhJson<Issue[]>(
+    ['issue', 'list', '--json', 'number,title,labels', '--limit', '40'],
+    cwd,
+  )
 
   const open = (n: number) => void runCommand('gh', ['issue', 'view', String(n), '--web'], cwd)
 
@@ -70,13 +40,13 @@ export function IssuesBody({ el }: { el: WidgetElement }) {
         >
           new
         </button>
-        <button className="diff__btn" title="Refresh" onClick={() => setNonce((n) => n + 1)}>
+        <button className="diff__btn" title="Refresh" onClick={refresh}>
           <IconReload />
         </button>
       </div>
       {err ? (
         <div className="diff__empty">{err}</div>
-      ) : issues == null ? (
+      ) : loading || issues == null ? (
         <div className="diff__empty">loading…</div>
       ) : issues.length === 0 ? (
         <div className="git__clean">no open issues</div>

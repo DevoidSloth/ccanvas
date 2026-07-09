@@ -24,6 +24,9 @@ import {
   IconData,
   IconPlot,
   IconChat,
+  IconVideo,
+  IconClaude,
+  IconInfo,
 } from '../ui/icons'
 import { useAgents, sendTo, sendPrompt, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
 import { NoteBody } from './NoteBody'
@@ -42,6 +45,10 @@ import { SqlBody } from './SqlBody'
 import { DataBody } from './DataBody'
 import { PlotBody } from './PlotBody'
 import { TranscriptBody } from './TranscriptBody'
+import { VideoBody } from './VideoBody'
+import { MediaInfoBody } from './MediaInfoBody'
+import { ClaudeBody } from './ClaudeBody'
+import { WidgetErrorBoundary } from '../ui/WidgetErrorBoundary'
 
 const KIND_ICON: Record<WidgetKind, (p: { className?: string; size?: number }) => JSX.Element> = {
   terminal: IconTerminal,
@@ -61,6 +68,9 @@ const KIND_ICON: Record<WidgetKind, (p: { className?: string; size?: number }) =
   data: IconData,
   plot: IconPlot,
   transcript: IconChat,
+  video: IconVideo,
+  mediainfo: IconInfo,
+  claude: IconClaude,
 }
 
 const MIN_W = 220
@@ -108,7 +118,10 @@ export function WidgetFrame({
     el.kind === 'sql' ||
     el.kind === 'data' ||
     el.kind === 'plot' ||
-    el.kind === 'transcript'
+    el.kind === 'transcript' ||
+    el.kind === 'claude' ||
+    el.kind === 'video' ||
+    el.kind === 'mediainfo'
   // notes are also single-click, but manage their own pointer handling
   // (toggle a checkbox vs. enter edit) so they don't use the generic capture
   const isNote = el.kind === 'note'
@@ -368,22 +381,27 @@ export function WidgetFrame({
         onDragOver={isTerminal ? onBodyDragOver : undefined}
         onDrop={isTerminal ? onBodyDrop : undefined}
       >
-        {el.kind === 'note' && <NoteBody el={el} active={active} />}
-        {el.kind === 'web' && <WebBody el={el} active={active} />}
-        {isTerminal && <TerminalBody el={el} active={active} visible={visible} />}
-        {el.kind === 'files' && <FilesBody el={el} />}
-        {el.kind === 'diff' && <DiffBody el={el} />}
-        {el.kind === 'editor' && <EditorBody el={el} active={active} />}
-        {el.kind === 'doc' && <DocBody el={el} />}
-        {el.kind === 'log' && <LogBody el={el} />}
-        {el.kind === 'pr' && <PrBody el={el} />}
-        {el.kind === 'issues' && <IssuesBody el={el} />}
-        {el.kind === 'runs' && <RunsBody el={el} />}
-        {el.kind === 'runner' && <RunnerBody el={el} />}
-        {el.kind === 'sql' && <SqlBody el={el} active={active} />}
-        {el.kind === 'data' && <DataBody el={el} />}
-        {el.kind === 'plot' && <PlotBody el={el} />}
-        {el.kind === 'transcript' && <TranscriptBody el={el} />}
+        <WidgetErrorBoundary>
+          {el.kind === 'note' && <NoteBody el={el} active={active} />}
+          {el.kind === 'web' && <WebBody el={el} active={active} />}
+          {el.kind === 'video' && <VideoBody el={el} active={active} />}
+          {el.kind === 'mediainfo' && <MediaInfoBody el={el} />}
+          {el.kind === 'claude' && <ClaudeBody el={el} />}
+          {isTerminal && <TerminalBody el={el} active={active} visible={visible} />}
+          {el.kind === 'files' && <FilesBody el={el} />}
+          {el.kind === 'diff' && <DiffBody el={el} />}
+          {el.kind === 'editor' && <EditorBody el={el} active={active} />}
+          {el.kind === 'doc' && <DocBody el={el} />}
+          {el.kind === 'log' && <LogBody el={el} />}
+          {el.kind === 'pr' && <PrBody el={el} />}
+          {el.kind === 'issues' && <IssuesBody el={el} />}
+          {el.kind === 'runs' && <RunsBody el={el} />}
+          {el.kind === 'runner' && <RunnerBody el={el} />}
+          {el.kind === 'sql' && <SqlBody el={el} active={active} />}
+          {el.kind === 'data' && <DataBody el={el} />}
+          {el.kind === 'plot' && <PlotBody el={el} />}
+          {el.kind === 'transcript' && <TranscriptBody el={el} />}
+        </WidgetErrorBoundary>
 
         {shielded && (
           <div
