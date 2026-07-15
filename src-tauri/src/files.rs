@@ -11,9 +11,14 @@ pub struct PickedFile {
     content: String,
 }
 
+// The pick_* commands must be async: sync commands run on the main thread,
+// and the blocking_* dialog APIs deadlock there on macOS (the native panel
+// itself needs the main thread). Async commands run on the runtime's pool,
+// where blocking on the dialog result is safe.
+
 /// Native "choose folder" dialog → absolute path (None if cancelled).
 #[tauri::command]
-pub fn pick_dir(app: AppHandle) -> Option<String> {
+pub async fn pick_dir(app: AppHandle) -> Option<String> {
     app.dialog()
         .file()
         .set_title("Choose a folder for this canvas")
@@ -24,7 +29,7 @@ pub fn pick_dir(app: AppHandle) -> Option<String> {
 
 /// Native "open .ccnvs" dialog → absolute path + contents (None if cancelled).
 #[tauri::command]
-pub fn pick_file(app: AppHandle) -> Result<Option<PickedFile>, String> {
+pub async fn pick_file(app: AppHandle) -> Result<Option<PickedFile>, String> {
     let picked = app
         .dialog()
         .file()
@@ -50,7 +55,7 @@ pub fn pick_file(app: AppHandle) -> Result<Option<PickedFile>, String> {
 /// path so the caller can read/watch it — used by the web widget to preview a
 /// local HTML file with live reload.
 #[tauri::command]
-pub fn pick_path(
+pub async fn pick_path(
     app: AppHandle,
     name: Option<String>,
     extensions: Option<Vec<String>>,
