@@ -66,18 +66,8 @@ const QUICK_COMMANDS: QuickCommand[] = [
   { name: 'agent', target: 'agent', desc: 'Claude agent', aliases: ['claude', 'ai'] },
   { name: 'term', target: 'terminal', desc: 'shell terminal', aliases: ['terminal', 'sh', 'shell'] },
   { name: 'files', target: 'files', desc: 'file tree', aliases: ['tree', 'explorer'] },
-  { name: 'diff', target: 'diff', desc: 'git diff', aliases: ['git'] },
+  { name: 'diff', target: 'diff', desc: 'git panel', aliases: ['git'] },
   { name: 'editor', target: 'editor', desc: 'file editor', aliases: ['edit', 'code'] },
-  { name: 'doc', target: 'doc', desc: 'live markdown', aliases: ['readme'] },
-  { name: 'log', target: 'log', desc: 'log tail', aliases: ['tail'] },
-  { name: 'runner', target: 'runner', desc: 'task runner', aliases: ['run', 'test'] },
-  { name: 'data', target: 'data', desc: 'data viewer', aliases: ['csv', 'parquet', 'table', 'df'] },
-  { name: 'plot', target: 'plot', desc: 'figure viewer', aliases: ['fig', 'figure', 'img', 'chart'] },
-  { name: 'pr', target: 'pr', desc: 'pull requests', aliases: ['prs'] },
-  { name: 'issues', target: 'issues', desc: 'github issues', aliases: ['issue'] },
-  { name: 'actions', target: 'runs', desc: 'github actions / CI', aliases: ['runs', 'ci', 'gh'] },
-  { name: 'web', target: 'web', desc: 'web preview', aliases: ['url', 'preview', 'browser'] },
-  { name: 'video', target: 'video', desc: 'video player', aliases: ['movie', 'mp4', 'clip'] },
   { name: 'note', target: 'note', desc: 'markdown note', aliases: ['md', 'markdown'] },
 ]
 
@@ -120,6 +110,11 @@ type Drag =
       began: boolean
     }
   | null
+
+// a 12px "+" in the top-left of each 140px tile, centred on a grid dot
+const REGISTRATION_CROSS = `url("data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><path d='M7 1v12M1 7h12' stroke='rgb(250,249,245)' stroke-opacity='0.09' stroke-width='1'/></svg>",
+)}")`
 
 export function Canvas() {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -302,11 +297,6 @@ export function Canvas() {
             cwd: agent.cwd,
             title: `${agent.title} · transcript`,
           }),
-      })
-      const boxed = ws.elements.some((e) => e.labelFor === lone.id)
-      items.push({
-        label: boxed ? 'Remove label box' : 'Label box',
-        onClick: () => s().labelAgent(lone.id),
       })
       items.push({ separator: true })
     }
@@ -515,11 +505,17 @@ export function Canvas() {
             : [hit.id]
         setSelection(withGroupSiblings(ws.elements, base))
         startMoveDrag(e)
-      } else {
-        if (!e.shiftKey) clearSelection()
+      } else if (e.shiftKey) {
+        // shift-drag on empty canvas: box-select
         dragRef.current = { kind: 'marquee', start: pt }
         setMarquee({ x: pt.x, y: pt.y, w: 0, h: 0 })
         rootRef.current?.setPointerCapture(e.pointerId)
+      } else {
+        // plain drag on empty canvas moves the view
+        clearSelection()
+        dragRef.current = { kind: 'pan', startCam: { x: cam.x, y: cam.y }, startPtr: pt }
+        rootRef.current?.setPointerCapture(e.pointerId)
+        setPanning(true)
       }
       return
     }
@@ -955,9 +951,10 @@ export function Canvas() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
       style={{
-        backgroundImage: 'radial-gradient(var(--grid-dot) 1px, transparent 1px)',
-        backgroundSize: `${28 * cam.zoom}px ${28 * cam.zoom}px`,
-        backgroundPosition: `${cam.x}px ${cam.y}px`,
+        // fine dot grid, plus a registration cross every 5 cells
+        backgroundImage: `${REGISTRATION_CROSS}, radial-gradient(var(--grid-dot) 1px, transparent 1px)`,
+        backgroundSize: `${140 * cam.zoom}px ${140 * cam.zoom}px, ${28 * cam.zoom}px ${28 * cam.zoom}px`,
+        backgroundPosition: `${cam.x - 7 * cam.zoom}px ${cam.y - 7 * cam.zoom}px, ${cam.x}px ${cam.y}px`,
       }}
     >
       {/* frames sit behind everything */}

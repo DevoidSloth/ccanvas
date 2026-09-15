@@ -1,12 +1,13 @@
 import { useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { isTauri } from './lib/backend'
 import { useStore, selectActive } from './store/workspace'
-import type { Tool } from './lib/types'
 import { zoomAt, screenToWorld } from './lib/geometry'
 import { TopBar } from './ui/TopBar'
 import { Tabs } from './ui/Tabs'
 import { Canvas } from './canvas/Canvas'
 import { Toolbar } from './ui/Toolbar'
-import { Props } from './ui/Props'
 import { Hud } from './ui/Hud'
 import { Welcome } from './ui/Welcome'
 import { SelectionBar } from './ui/SelectionBar'
@@ -19,6 +20,7 @@ import { ContextMenuHost, isEditableTarget } from './ui/ContextMenu'
 import { Roster } from './ui/Roster'
 import { PromptLibrary } from './ui/PromptLibrary'
 import { Checkpoints } from './ui/Checkpoints'
+import { MemoryPanel } from './ui/MemoryPanel'
 import { CanvasSearch } from './ui/CanvasSearch'
 import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
@@ -26,18 +28,6 @@ import { FollowController } from './ui/FollowController'
 // topbar (44) + tabs (38); keep in sync with --topbar-h / --tabs-h in global.css
 const CHROME_H = 82
 
-const TOOL_KEYS: Record<string, Tool> = {
-  v: 'select',
-  h: 'pan',
-  t: 'text',
-  p: 'pen',
-  d: 'pen',
-  a: 'arrow',
-  r: 'rect',
-  o: 'ellipse',
-  f: 'frame',
-  e: 'eraser',
-}
 
 // Anchor zooms at the centre of the canvas area (below the chrome).
 function canvasCenter() {
@@ -45,6 +35,34 @@ function canvasCenter() {
 }
 function worldCenter() {
   return screenToWorld(canvasCenter(), selectActive(useStore.getState()).camera)
+}
+
+// ⌘W: close the widget you're in — the one holding keyboard focus (e.g. a
+// terminal you're typing in), else the active one, else the selected widgets.
+// With no widget left on any tab, quit the app.
+function closeCurrentWidget() {
+  const store = useStore.getState()
+  const ws = store.active()
+  const widgetIds = new Set(
+    (ws?.elements ?? []).filter((e) => e.type === 'widget').map((e) => e.id),
+  )
+  const focused = (document.activeElement as HTMLElement | null)
+    ?.closest?.('[data-widget-id]')
+    ?.getAttribute('data-widget-id')
+  let targets: string[] = []
+  if (focused && widgetIds.has(focused)) targets = [focused]
+  else if (store.activeWidgetId && widgetIds.has(store.activeWidgetId))
+    targets = [store.activeWidgetId]
+  else targets = store.selection.filter((id) => widgetIds.has(id))
+
+  if (targets.length) {
+    store.removeElements(targets)
+    store.setActiveWidget(null)
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
+    return
+  }
+  const anyWidgets = store.tabs.some((t) => t.elements.some((e) => e.type === 'widget'))
+  if (!anyWidgets) void invoke('quit_app')
 }
 
 export default function App() {
@@ -78,9 +96,19 @@ export default function App() {
         store.newTab()
         return
       }
+      // ⌘T new terminal, ⌘⇧T new Claude agent — dropped at the centre of the
+      // view and focused so you can type right away (works from inside a terminal)
+      if (mod && key === 't' && !e.altKey) {
+        e.preventDefault()
+        const w = worldCenter()
+        const id = store.spawnWidget(e.shiftKey ? 'agent' : 'terminal', w.x, w.y)
+        store.setSelection([id])
+        store.setActiveWidget(id)
+        return
+      }
       if (mod && key === 'k') {
         e.preventDefault()
-        store.setPaletteOpen(true)
+        store.setPaletteOpen(!store.paletteOpen)
         return
       }
       // ⌘F opens canvas search — but only when not typing into a field or a
@@ -172,11 +200,18 @@ export default function App() {
         store.zoomToSelection(window.innerWidth, window.innerHeight - CHROME_H)
         return
       }
-      const mapped = TOOL_KEYS[key]
-      if (mapped) store.setTool(mapped)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // the desktop menu's ⌘W item routes here instead of closing the window
+  useEffect(() => {
+    if (!isTauri()) return
+    const unlisten = listen('menu:close-widget', closeCurrentWidget)
+    return () => {
+      void unlisten.then((off) => off())
+    }
   }, [])
 
   // paste an image from the clipboard onto the canvas
@@ -244,7 +279,6 @@ export default function App() {
         <Canvas />
         <Welcome />
         <Toolbar />
-        <Props />
         <SelectionBar />
         <AttentionBar />
         <TrackingBar />
@@ -257,6 +291,7 @@ export default function App() {
         {openPanel === 'roster' && <Roster />}
         {openPanel === 'prompts' && <PromptLibrary />}
         {openPanel === 'checkpoints' && <Checkpoints />}
+        {openPanel === 'memory' && <MemoryPanel />}
       </main>
       <ContextMenuHost />
       <FollowController />

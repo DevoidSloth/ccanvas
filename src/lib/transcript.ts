@@ -119,6 +119,59 @@ export function extractLastAssistant(jsonl: string): string | null {
   return out || null
 }
 
+// ---------- context window (context meter) ----------
+
+export type ContextUsage = {
+  /** tokens in the context at the most recent reply */
+  used: number
+  /** model id of that reply, e.g. "claude-opus-5" */
+  model?: string
+  /** largest context seen in this session (hints at a 1M window) */
+  peak: number
+}
+
+type UsageEvent = {
+  type?: string
+  isSidechain?: boolean
+  message?: {
+    model?: string
+    usage?: {
+      input_tokens?: number
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+      output_tokens?: number
+    }
+  }
+}
+
+/** How full the main conversation's context is, from its last assistant reply.
+ *  Subagent (sidechain) turns have their own context and are skipped. */
+export function extractContext(jsonl: string): ContextUsage | null {
+  let last: ContextUsage | null = null
+  let peak = 0
+  for (const ln of completeLines(jsonl)) {
+    if (!ln.includes('"usage"')) continue
+    let ev: UsageEvent
+    try {
+      ev = JSON.parse(ln)
+    } catch {
+      continue
+    }
+    const u = ev.message?.usage
+    if (ev.type !== 'assistant' || ev.isSidechain || !u) continue
+    if (ev.message?.model === '<synthetic>') continue
+    const used =
+      (u.input_tokens ?? 0) +
+      (u.cache_read_input_tokens ?? 0) +
+      (u.cache_creation_input_tokens ?? 0) +
+      (u.output_tokens ?? 0)
+    if (!used) continue
+    peak = Math.max(peak, used)
+    last = { used, model: ev.message?.model, peak }
+  }
+  return last ? { ...last, peak } : null
+}
+
 // ---------- files touched (tracking camera) ----------
 
 export type ToolFile = {

@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store/workspace'
 import { useAgents, sendPrompt } from '../lib/agents'
+import { readTranscript, extractLastAssistant } from '../lib/transcript'
 import type { WidgetElement, Workspace } from '../lib/types'
 import { IconClose, IconBroadcast, IconTrack } from './icons'
 import '../styles/agent-tools.css'
@@ -8,6 +9,43 @@ import '../styles/agent-tools.css'
 const CHROME_H = 82
 
 type Row = { agent: WidgetElement; tab: Workspace }
+
+const MESSAGE_POLL_MS = 6000
+
+/** Each agent's latest reply, read from its session transcript. The terminal
+ *  tail is full of TUI chrome (spinners, hints, box drawing), so it isn't used. */
+function useLastMessages(rows: Row[]): Record<string, string> {
+  const [msgs, setMsgs] = useState<Record<string, string>>({})
+  const key = rows.map((r) => `${r.agent.id}:${r.agent.cwd}:${r.agent.sessionId}`).join('|')
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      const next: Record<string, string> = {}
+      await Promise.all(
+        rows.map(async ({ agent }) => {
+          const jsonl = await readTranscript(agent.cwd, agent.sessionId)
+          const text = jsonl && extractLastAssistant(jsonl)
+          if (!text) return
+          // one readable line: first non-empty line, markdown markers dropped
+          const line = text
+            .split('\n')
+            .map((l) => l.replace(/^[#>*\-\s`]+/, '').trim())
+            .find(Boolean)
+          if (line) next[agent.id] = line.slice(0, 160)
+        }),
+      )
+      if (alive) setMsgs(next)
+    }
+    void poll()
+    const id = setInterval(poll, MESSAGE_POLL_MS)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return msgs
+}
 
 // Mission-control list of every agent across all tabs: status, cost/turns, last
 // line, click-to-focus, and a composer that sends to one agent or broadcasts to
@@ -28,7 +66,6 @@ export function Roster() {
 
   const status = useAgents((s) => s.status)
   const metrics = useAgents((s) => s.metrics)
-  const lastLine = useAgents((s) => s.lastLine)
 
   const [text, setText] = useState('')
   const [target, setTarget] = useState<string | null>(null) // agent id, or null = all
@@ -40,6 +77,7 @@ export function Roster() {
         if (e.type === 'widget' && e.kind === 'agent') out.push({ agent: e, tab })
     return out
   }, [tabs])
+  const lastMessage = useLastMessages(rows)
 
   const focus = (row: Row) => {
     if (activeTabId !== row.tab.id) switchTab(row.tab.id)
@@ -84,12 +122,12 @@ export function Roster() {
 
       <div className="panel__body">
         {rows.length === 0 && (
-          <div className="panel__empty">No agents yet. Spawn one with the “a” tool or ⌘K.</div>
+          <div className="panel__empty">No agents yet. Start one with ⌘⇧T.</div>
         )}
         {rows.map((row) => {
           const st = status[row.agent.id] ?? 'off'
           const m = metrics[row.agent.id]
-          const ll = lastLine[row.agent.id]
+          const ll = lastMessage[row.agent.id]
           const tracking = trackingId === row.agent.id
           return (
             <div

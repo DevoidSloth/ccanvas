@@ -26,7 +26,6 @@ export function TopBar() {
   const togglePanel = useStore((s) => s.togglePanel)
   const followAgent = useStore((s) => s.followAgent)
   const setFollowAgent = useStore((s) => s.setFollowAgent)
-  const openClaudeWorkspace = useStore((s) => s.openClaudeWorkspace)
 
   const agentCount = tabs.reduce(
     (n, t) => n + t.elements.filter((e) => e.type === 'widget' && e.kind === 'agent').length,
@@ -39,10 +38,7 @@ export function TopBar() {
         <span className="brand__mark">
           <IconMark />
         </span>
-        <span className="brand__name">
-          c<b>canvas</b>
-        </span>
-        <span className="brand__dot" />
+        <span className="brand__name">ccanvas</span>
       </div>
 
       <button
@@ -56,40 +52,45 @@ export function TopBar() {
 
       <div className="topbar__tools">
         <button
-          className={`tb-icon${openPanel === 'roster' ? ' tb-icon--on' : ''}`}
-          title="Agent roster"
+          className={`tb-tool${openPanel === 'roster' ? ' tb-tool--on' : ''}`}
+          title="Every agent across your tabs: status, last message, and a composer to message them"
           onClick={() => togglePanel('roster')}
         >
           <IconAgent />
-          {agentCount > 0 && <span className="tb-icon__badge">{agentCount}</span>}
+          <span className="tb-tool__label">Agents</span>
+          {agentCount > 0 && <span className="tb-tool__count">{agentCount}</span>}
         </button>
         <button
-          className={`tb-icon${openPanel === 'prompts' ? ' tb-icon--on' : ''}`}
-          title="Prompt library"
+          className={`tb-tool${openPanel === 'prompts' ? ' tb-tool--on' : ''}`}
+          title="Saved prompts you can send to any agent"
           onClick={() => togglePanel('prompts')}
         >
           <IconChat />
+          <span className="tb-tool__label">Prompts</span>
         </button>
         <button
-          className={`tb-icon${openPanel === 'checkpoints' ? ' tb-icon--on' : ''}`}
-          title="Checkpoints"
+          className={`tb-tool${openPanel === 'checkpoints' ? ' tb-tool--on' : ''}`}
+          title="Git snapshots of your project you can roll back to"
           onClick={() => togglePanel('checkpoints')}
         >
           <IconHistory />
+          <span className="tb-tool__label">Checkpoints</span>
         </button>
         <button
-          className={`tb-icon${followAgent ? ' tb-icon--on' : ''}`}
-          title="Follow the active agent (auto-pan the camera)"
+          className={`tb-tool${followAgent ? ' tb-tool--on' : ''}`}
+          title="Move the view to whichever agent starts working"
           onClick={() => setFollowAgent(!followAgent)}
         >
           <IconFollow />
+          <span className="tb-tool__label">Follow agents</span>
         </button>
         <button
-          className="tb-icon"
-          title="Claude workspace — open the knowledge-graph map in a new tab"
-          onClick={() => openClaudeWorkspace()}
+          className={`tb-tool${openPanel === 'memory' ? ' tb-tool--on' : ''}`}
+          title="Claude's memory for this project, as a linked graph"
+          onClick={() => togglePanel('memory')}
         >
           <IconClaude />
+          <span className="tb-tool__label">Memory</span>
         </button>
       </div>
 
@@ -97,17 +98,17 @@ export function TopBar() {
 
       <div className="topbar__actions">
         <UsagePill />
-        <button className="tb-btn" onClick={() => setPaletteOpen(true)} title="Command palette">
-          <IconSearch /> Commands <span className="kbd">⌘K</span>
+        <button className="tb-btn" onClick={() => setPaletteOpen(true)} title="Commands (⌘K)">
+          <IconSearch /> <span className="tb-btn__label">Commands</span> <span className="kbd">⌘K</span>
         </button>
-        <button className="tb-btn" onClick={() => void openFile()}>
-          <IconFolder /> Open <span className="kbd">⌘O</span>
+        <button className="tb-btn" onClick={() => void openFile()} title="Open a canvas (⌘O)">
+          <IconFolder /> <span className="tb-btn__label">Open</span> <span className="kbd">⌘O</span>
         </button>
-        <button className="tb-btn" onClick={() => void saveActive()}>
-          <IconSave /> Save <span className="kbd">⌘S</span>
+        <button className="tb-btn" onClick={() => void saveActive()} title="Save this canvas (⌘S)">
+          <IconSave /> <span className="tb-btn__label">Save</span> <span className="kbd">⌘S</span>
         </button>
-        <button className="tb-btn tb-btn--accent" onClick={() => void newTab()}>
-          <IconPlus /> New
+        <button className="tb-btn tb-btn--accent" onClick={() => void newTab()} title="New canvas (⌘N)">
+          <IconPlus /> <span className="tb-btn__label">New</span>
         </button>
       </div>
     </header>

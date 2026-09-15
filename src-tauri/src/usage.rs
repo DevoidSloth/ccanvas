@@ -4,7 +4,9 @@
 // window (and the last 24h) the same way `ccusage` does.
 
 use serde::Serialize;
+use std::collections::HashSet;
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
@@ -35,8 +37,8 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146097 + doe - 719468
 }
 
-// parse `YYYY-MM-DDTHH:MM:SS(.sss)?Z` (always UTC) → epoch ms
-fn parse_iso_ms(s: &str) -> Option<i64> {
+// parse `YYYY-MM-DDTHH:MM:SS(.sss)?` (UTC; any trailing zone ignored) → epoch ms
+pub(crate) fn parse_iso_ms(s: &str) -> Option<i64> {
     if s.len() < 19 {
         return None;
     }
@@ -65,6 +67,29 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Every `.jsonl` under `dir`, recursively (subagent transcripts live in
+/// per-session subfolders), skipping files not modified since `cutoff`.
+fn recent_jsonl(dir: &Path, cutoff: i64, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for ent in rd.flatten() {
+        let p = ent.path();
+        let Ok(meta) = ent.metadata() else { continue };
+        if meta.is_dir() {
+            recent_jsonl(&p, cutoff, out);
+        } else if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            let recent = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64 >= cutoff)
+                .unwrap_or(true);
+            if recent {
+                out.push(p);
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub fn claude_usage(app: AppHandle) -> ClaudeUsage {
     let Ok(home) = app.path().home_dir() else {
@@ -75,59 +100,46 @@ pub fn claude_usage(app: AppHandle) -> ClaudeUsage {
     // only files touched recently can hold entries inside our windows
     let cutoff = now - 25 * HOUR_MS;
 
+    let mut files = Vec::new();
+    recent_jsonl(&root, cutoff, &mut files);
+
     let mut entries: Vec<(i64, u64)> = Vec::new();
-    if let Ok(projects) = fs::read_dir(&root) {
-        for proj in projects.flatten() {
-            let pdir = proj.path();
-            if !pdir.is_dir() {
+    // Claude Code writes one line per content block of a reply, each repeating
+    // the same message id + usage; count each API response once
+    let mut seen: HashSet<String> = HashSet::new();
+    for fp in files {
+        let Ok(content) = fs::read_to_string(&fp) else {
+            continue;
+        };
+        for line in content.lines() {
+            if !line.contains("\"usage\"") {
                 continue;
             }
-            let Ok(files) = fs::read_dir(&pdir) else {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
                 continue;
             };
-            for f in files.flatten() {
-                let fp = f.path();
-                if fp.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            let u = &v["message"]["usage"];
+            if u.is_null() {
+                continue;
+            }
+            if let Some(id) = v["message"]["id"].as_str() {
+                let key = format!("{id}:{}", v["requestId"].as_str().unwrap_or(""));
+                if !seen.insert(key) {
                     continue;
                 }
-                let recent = f
-                    .metadata()
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as i64 >= cutoff)
-                    .unwrap_or(true);
-                if !recent {
-                    continue;
-                }
-                let Ok(content) = fs::read_to_string(&fp) else {
-                    continue;
-                };
-                for line in content.lines() {
-                    if !line.contains("\"usage\"") {
-                        continue;
-                    }
-                    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
-                        continue;
-                    };
-                    let u = &v["message"]["usage"];
-                    if u.is_null() {
-                        continue;
-                    }
-                    // count new work (input + output + cache writes); cache
-                    // *reads* are cheap and re-counted every turn, so excluding
-                    // them keeps the number a meaningful usage signal
-                    let tok = u["input_tokens"].as_u64().unwrap_or(0)
-                        + u["output_tokens"].as_u64().unwrap_or(0)
-                        + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-                    if tok == 0 {
-                        continue;
-                    }
-                    if let Some(ts) = v["timestamp"].as_str().and_then(parse_iso_ms) {
-                        if ts >= cutoff {
-                            entries.push((ts, tok));
-                        }
-                    }
+            }
+            // count new work (input + output + cache writes); cache *reads* are
+            // cheap and re-counted every turn, so excluding them keeps the
+            // number a meaningful usage signal
+            let tok = u["input_tokens"].as_u64().unwrap_or(0)
+                + u["output_tokens"].as_u64().unwrap_or(0)
+                + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+            if tok == 0 {
+                continue;
+            }
+            if let Some(ts) = v["timestamp"].as_str().and_then(parse_iso_ms) {
+                if ts >= cutoff {
+                    entries.push((ts, tok));
                 }
             }
         }
@@ -142,14 +154,16 @@ pub fn claude_usage(app: AppHandle) -> ClaudeUsage {
     let day_tokens: u64 = entries.iter().filter(|e| e.0 >= day_cut).map(|e| e.1).sum();
 
     // group into 5-hour blocks; a new block starts on a >5h gap or once 5h
-    // have elapsed since the block's first message
-    let mut block_start = entries[0].0;
+    // have elapsed since the block began. Blocks begin on the hour of their
+    // first message, which is how Claude's rate-limit windows line up.
+    let floor_hour = |ts: i64| ts - ts.rem_euclid(HOUR_MS);
+    let mut block_start = floor_hour(entries[0].0);
     let mut block_tokens = 0u64;
     let mut block_msgs = 0u64;
     let mut prev = entries[0].0;
     for &(ts, tok) in &entries {
         if ts - block_start >= FIVE_H_MS || ts - prev > FIVE_H_MS {
-            block_start = ts;
+            block_start = floor_hour(ts);
             block_tokens = 0;
             block_msgs = 0;
         }

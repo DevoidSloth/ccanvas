@@ -182,50 +182,52 @@ async function claudeUsage() {
   const now = Date.now()
   const cutoff = now - 25 * 3600_000
   const entries = []
-  let projects
-  try {
-    projects = await fs.readdir(root, { withFileTypes: true })
-  } catch {
-    return empty
-  }
-  for (const proj of projects) {
-    if (!proj.isDirectory()) continue
-    const pdir = nodePath.join(root, proj.name)
-    let files
+  const files = []
+  const walk = async (dir) => {
+    let ents
     try {
-      files = await fs.readdir(pdir, { withFileTypes: true })
+      ents = await fs.readdir(dir, { withFileTypes: true })
     } catch {
-      continue
+      return
     }
-    for (const f of files) {
-      if (!f.isFile() || !f.name.endsWith('.jsonl')) continue
-      const fp = nodePath.join(pdir, f.name)
-      try {
-        const st = await fs.stat(fp)
-        if (st.mtimeMs < cutoff) continue
-        const content = await fs.readFile(fp, 'utf8')
-        for (const line of content.split('\n')) {
-          if (!line.includes('"usage"')) continue
-          let v
-          try {
-            v = JSON.parse(line)
-          } catch {
-            continue
-          }
-          const u = v && v.message && v.message.usage
-          if (!u) continue
-          // new work only — cache *reads* are cheap and re-counted each turn
-          const tok =
-            (u.input_tokens || 0) +
-            (u.output_tokens || 0) +
-            (u.cache_creation_input_tokens || 0)
-          if (!tok) continue
-          const ts = v.timestamp ? Date.parse(v.timestamp) : NaN
-          if (!Number.isNaN(ts) && ts >= cutoff) entries.push([ts, tok])
+    for (const e of ents) {
+      const p = nodePath.join(dir, e.name)
+      if (e.isDirectory()) await walk(p)
+      else if (e.isFile() && e.name.endsWith('.jsonl')) files.push(p)
+    }
+  }
+  await walk(root)
+  // one line per content block repeats the same message id + usage; count once
+  const seen = new Set()
+  for (const fp of files) {
+    try {
+      const st = await fs.stat(fp)
+      if (st.mtimeMs < cutoff) continue
+      const content = await fs.readFile(fp, 'utf8')
+      for (const line of content.split('\n')) {
+        if (!line.includes('"usage"')) continue
+        let v
+        try {
+          v = JSON.parse(line)
+        } catch {
+          continue
         }
-      } catch {
-        /* skip unreadable file */
+        const u = v && v.message && v.message.usage
+        if (!u) continue
+        if (v.message.id) {
+          const key = `${v.message.id}:${v.requestId || ''}`
+          if (seen.has(key)) continue
+          seen.add(key)
+        }
+        // new work only — cache *reads* are cheap and re-counted each turn
+        const tok =
+          (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0)
+        if (!tok) continue
+        const ts = v.timestamp ? Date.parse(v.timestamp) : NaN
+        if (!Number.isNaN(ts) && ts >= cutoff) entries.push([ts, tok])
       }
+    } catch {
+      /* skip unreadable file */
     }
   }
   if (!entries.length) return empty
@@ -233,13 +235,15 @@ async function claudeUsage() {
   const FIVE_H = 5 * 3600_000
   const dayCut = now - 24 * 3600_000
   const dayTokens = entries.filter((e) => e[0] >= dayCut).reduce((s, e) => s + e[1], 0)
-  let bStart = entries[0][0]
+  // blocks begin on the hour of their first message
+  const floorHour = (ts) => ts - (ts % 3600_000)
+  let bStart = floorHour(entries[0][0])
   let bTok = 0
   let bMsg = 0
   let prev = entries[0][0]
   for (const [ts, tok] of entries) {
     if (ts - bStart >= FIVE_H || ts - prev > FIVE_H) {
-      bStart = ts
+      bStart = floorHour(ts)
       bTok = 0
       bMsg = 0
     }

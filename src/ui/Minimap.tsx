@@ -78,10 +78,10 @@ export function Minimap() {
             el.type === 'widget'
               ? WIDGET_ACCENT[el.kind]
               : el.type === 'frame'
-                ? '#61605b'
+                ? '#8f8c83'
                 : el.type === 'image'
-                  ? '#7fc7c0'
-                  : '#4a4d57'
+                  ? '#6cc3d1'
+                  : '#6b6862'
           return (
             <div
               key={el.id}

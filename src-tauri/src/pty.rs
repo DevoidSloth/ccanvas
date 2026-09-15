@@ -67,7 +67,11 @@ fn default_shell() -> CommandBuilder {
         let shell = std::env::var("CCANVAS_SHELL")
             .or_else(|_| std::env::var("SHELL"))
             .unwrap_or_else(|_| "bash".into());
-        CommandBuilder::new(shell)
+        // login shell, like Terminal/iTerm: a bundle launched from Finder never
+        // sourced the user's profile (.zprofile, brew shellenv, …)
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.arg("-l");
+        cmd
     }
 }
 
@@ -143,6 +147,16 @@ fn spawn_session(
     // inherit the full environment (PowerShell needs SystemRoot/PATH/etc.)
     for (k, v) in std::env::vars() {
         cmd.env(k, v);
+    }
+    // a GUI app has no TERM/locale, so prompt themes fall back to plain output
+    // and mangle Powerline glyphs; advertise what xterm.js actually supports
+    if !cfg!(windows) {
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        if std::env::var("LANG").map_or(true, |l| l.is_empty()) {
+            let lang = crate::term_profile::system_lang().unwrap_or_else(|| "en_US.UTF-8".into());
+            cmd.env("LANG", lang);
+        }
     }
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
         cmd.cwd(dir);

@@ -33,19 +33,8 @@ const SPAWNABLE: { kind: WidgetKind; label: string }[] = [
   { kind: 'agent', label: 'Claude agent' },
   { kind: 'terminal', label: 'Terminal' },
   { kind: 'files', label: 'File tree' },
-  { kind: 'diff', label: 'Git diff' },
+  { kind: 'diff', label: 'Git panel' },
   { kind: 'editor', label: 'Editor' },
-  { kind: 'doc', label: 'Live doc' },
-  { kind: 'log', label: 'Log tail' },
-  { kind: 'runner', label: 'Task runner' },
-  { kind: 'sql', label: 'SQL editor' },
-  { kind: 'data', label: 'Data viewer (csv/parquet/h5/json)' },
-  { kind: 'plot', label: 'Figure viewer' },
-  { kind: 'pr', label: 'Pull requests' },
-  { kind: 'issues', label: 'GitHub issues' },
-  { kind: 'runs', label: 'GitHub Actions' },
-  { kind: 'web', label: 'Web preview' },
-  { kind: 'video', label: 'Video player' },
   { kind: 'note', label: 'Note' },
 ]
 
@@ -183,33 +172,20 @@ export function CommandPalette() {
       { id: 'new', label: 'New canvas', hint: '⌘N', group: 'Canvas', run: () => void s.newTab() },
       {
         id: 'claude-workspace',
-        label: 'Open Claude workspace (knowledge-graph map)',
-        hint: 'tab',
+        label: "Show Claude's memory graph",
+        hint: 'panel',
         group: 'Canvas',
-        run: () => s.openClaudeWorkspace(),
+        run: () => s.setOpenPanel('memory'),
       },
       { id: 'folder', label: 'Set canvas folder…', group: 'Canvas', run: () => void s.setActiveDir() },
       { id: 'png', label: 'Export as PNG', group: 'Canvas', run: () => void downloadPng(ws) },
       { id: 'svg', label: 'Export as SVG', group: 'Canvas', run: () => downloadSvg(ws) },
-      {
-        id: 'present',
-        label: 'Start presentation (step through frames)',
-        group: 'View',
-        run: () => s.setPresenting(true),
-      },
       {
         id: 'focus',
         label: 'Focus selection',
         hint: '\\',
         group: 'View',
         run: () => s.zoomToSelection(window.innerWidth, window.innerHeight - CHROME_H),
-      },
-      {
-        id: 'flows-toggle',
-        label: s.flowsEnabled ? 'Pause agent flows' : 'Resume agent flows',
-        hint: s.flowsEnabled ? 'running' : 'paused',
-        group: 'View',
-        run: () => s.setFlowsEnabled(!s.flowsEnabled),
       },
       {
         id: 'panel-roster',
@@ -357,6 +333,11 @@ export function CommandPalette() {
           onKeyDown={(e) => {
             e.stopPropagation()
             if (e.key === 'Escape') return close()
+            // ⌘K again closes the palette it opened
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+              e.preventDefault()
+              return close()
+            }
             if (e.key === 'ArrowDown') {
               e.preventDefault()
               setHi((active + 1) % Math.max(1, filtered.length))

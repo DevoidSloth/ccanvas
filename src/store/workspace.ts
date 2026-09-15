@@ -165,7 +165,7 @@ export type AgentWizardCtx = {
 }
 
 /** Side panels that share the right-hand dock (only one open at a time). */
-export type SidePanel = 'roster' | 'prompts' | 'checkpoints'
+export type SidePanel = 'roster' | 'prompts' | 'checkpoints' | 'memory'
 
 export type Store = {
   tabs: Workspace[]
@@ -342,7 +342,7 @@ export const useStore = create<Store>((set, get) => ({
   trackingAgentId: null,
   snapGuides: null,
   presenting: false,
-  flowsEnabled: true,
+  flowsEnabled: false, // connector flows were removed from the UI
 
   active: () => {
     const s = get()

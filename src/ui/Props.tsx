@@ -8,6 +8,9 @@ export function Props() {
   const setColor = useStore((s) => s.setColor)
   const strokeWidth = useStore((s) => s.strokeWidth)
   const setStrokeWidth = useStore((s) => s.setStrokeWidth)
+  const tool = useStore((s) => s.tool)
+  // only relevant while drawing connectors, not while managing agents
+  if (tool !== 'arrow') return null
 
   return (
     <div className="props">

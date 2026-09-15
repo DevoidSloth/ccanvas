@@ -59,10 +59,10 @@ function elementSvg(el: CanvasElement, byId: Map<string, CanvasElement>): string
       const accent = WIDGET_ACCENT[el.kind]
       return (
         `<g>` +
-        `<rect x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" rx="9" fill="#121419" stroke="#23262e"/>` +
-        `<rect x="${el.x}" y="${el.y}" width="${el.w}" height="26" rx="9" fill="#15171d"/>` +
+        `<rect x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" rx="9" fill="#262624" stroke="#3a3935"/>` +
+        `<rect x="${el.x}" y="${el.y}" width="${el.w}" height="26" rx="9" fill="#2a2927"/>` +
         `<rect x="${el.x}" y="${el.y}" width="3" height="${el.h}" fill="${accent}"/>` +
-        `<text x="${el.x + 12}" y="${el.y + 17}" font-family="monospace" font-size="11" fill="#9a9892">${esc(el.kind)} · ${esc(el.title)}</text>` +
+        `<text x="${el.x + 12}" y="${el.y + 17}" font-family="monospace" font-size="11" fill="#c2c0b6">${esc(el.kind)} · ${esc(el.title)}</text>` +
         `</g>`
       )
     }
@@ -82,7 +82,7 @@ export function exportSvg(ws: Workspace): string {
     .join('\n')
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${vb.w}" height="${vb.h}" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}">` +
-    `<rect x="${vb.x}" y="${vb.y}" width="${vb.w}" height="${vb.h}" fill="#0a0b0d"/>` +
+    `<rect x="${vb.x}" y="${vb.y}" width="${vb.w}" height="${vb.h}" fill="#1f1e1d"/>` +
     body +
     `</svg>`
   )

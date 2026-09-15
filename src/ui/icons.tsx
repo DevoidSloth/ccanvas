@@ -454,20 +454,21 @@ export const IconMark = (p: P) => (
     style={{ display: 'block' }}
     className={p.className}
   >
-    <circle
-      cx="12"
-      cy="12"
-      r="8"
-      stroke="currentColor"
-      strokeWidth="2"
-      fill="none"
-    />
-    <circle cx="12" cy="12" r="2.2" fill="currentColor" />
+    {/* two nested "c" patch cables: outer ends in a jack, inner in a lit LED
+        (same geometry as src-tauri/icons/source/ccanvas.svg, without the plate) */}
     <path
-      d="M12 4v3M12 17v3M4 12h3M17 12h3"
-      stroke="currentColor"
-      strokeWidth="2"
+      d="M17.46 5.49A8.5 8.5 0 1 0 17.46 18.51"
+      stroke="var(--ink, #faf9f5)"
+      strokeWidth="2.2"
       strokeLinecap="round"
     />
+    <circle cx="17.46" cy="5.49" r="1.7" fill="var(--bg, #1f1e1d)" stroke="var(--ink, #faf9f5)" strokeWidth="1" />
+    <path
+      d="M14.7 8.78A4.2 4.2 0 1 0 14.7 15.22"
+      stroke="var(--accent, #d97757)"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+    />
+    <circle cx="14.7" cy="15.22" r="0.9" fill="#fbe3d8" />
   </svg>
 )

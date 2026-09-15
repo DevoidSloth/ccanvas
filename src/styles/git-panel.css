@@ -76,7 +76,7 @@
 }
 .ghd__sync:hover:not(:disabled) {
   background: var(--accent);
-  color: #1a0f0c;
+  color: #1f0f09;
 }
 .ghd__sync:disabled {
   opacity: 0.5;
@@ -224,15 +224,15 @@
 }
 .ghd__badge--mod {
   color: var(--k-note);
-  background: rgba(216, 166, 87, 0.14);
+  background: rgba(222, 181, 102, 0.14);
 }
 .ghd__badge--new {
-  color: #8bbf73;
-  background: rgba(139, 191, 115, 0.14);
+  color: #5ab977;
+  background: rgba(90, 185, 119, 0.14);
 }
 .ghd__badge--del {
-  color: #e8795a;
-  background: rgba(232, 121, 90, 0.14);
+  color: #d97757;
+  background: rgba(217, 119, 87, 0.14);
 }
 
 /* ---------- commit composer ---------- */
@@ -289,7 +289,7 @@
 }
 .ghd__commit:hover:not(:disabled) {
   background: var(--accent);
-  color: #1a0f0c;
+  color: #1f0f09;
 }
 .ghd__commit:disabled {
   opacity: 0.45;
@@ -361,16 +361,16 @@
 }
 .ghd__diff .diff__hunk {
   color: var(--k-web);
-  background: rgba(109, 181, 168, 0.08);
+  background: rgba(88, 180, 201, 0.08);
   margin: 2px 0;
 }
 .ghd__diff .diff__add {
   color: #b6d99a;
-  background: rgba(139, 191, 115, 0.1);
-  box-shadow: inset 3px 0 0 rgba(139, 191, 115, 0.55);
+  background: rgba(90, 185, 119, 0.1);
+  box-shadow: inset 3px 0 0 rgba(90, 185, 119, 0.55);
 }
 .ghd__diff .diff__del {
-  color: #f0a08c;
-  background: rgba(232, 121, 90, 0.1);
-  box-shadow: inset 3px 0 0 rgba(232, 121, 90, 0.55);
+  color: #f0b39b;
+  background: rgba(217, 119, 87, 0.1);
+  box-shadow: inset 3px 0 0 rgba(217, 119, 87, 0.55);
 }

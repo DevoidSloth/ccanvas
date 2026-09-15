@@ -19,9 +19,7 @@ self-contained `.ccnvs` workspace you can save, reopen, and share.
 
 A terminal multiplexer gives you panes; ccanvas gives you *space*. Lay out a
 fleet of agents the way you'd sketch them on a whiteboard, watch each one's
-status at a glance, and connect them with **logic arrows** so a diagram of
-agents becomes a runnable pipeline: *"when this one succeeds, hand its output to
-that one."* When the canvas gets crowded, the **agent roster**, **canvas
+status at a glance, and see how full each one's context is. When the canvas gets crowded, the **agent roster**, **canvas
 search**, and a **tracking camera** that orbits an agent's files keep you
 oriented.
 
@@ -73,12 +71,12 @@ backend isn't running; the footer pill shows `pty` (live) or `local`
 | Surface | Notes |
 | --- | --- |
 | **Infinite canvas** | Pan (`H` / middle-mouse / two-finger scroll), smooth zoom (⌘/Ctrl-scroll), dot grid, minimap |
-| **Quick insert** | `Space` drops text at the cursor; press `/` then a widget name (`agent` `term` `files` `diff` `editor` `doc` `log` `runner` `data` `plot` `pr` `issues` `actions` `web` `note`) to spawn one |
+| **Quick insert** | `Space` drops text at the cursor; press `/` then a widget name (`agent` `term` `files` `diff` `editor` `note`) to spawn one |
 | **Command palette** | ⌘/Ctrl-K to spawn widgets, arrange, switch tabs, open panels, insert prompts, export, or jump to a widget |
-| **Vector ink** | Text, freehand draw, arrows (snap to widget **anchor points**, drag the midpoint to **curve**, drag an endpoint to reconnect), rectangles, ellipses, frames, images, 6-color palette |
-| **Widgets** | Terminal · Claude agent · Transcript · File tree · Git diff · Editor (Monaco) · Live doc · Log tail · Task runner · Data viewer (CSV/Parquet) · Figure viewer · SQL · Web preview (URL **or** local `.html`, live-reloading) · Markdown note |
-| **GitHub (`gh`) widgets** | Pull requests · Issues · Actions/CI runs: list, open in browser, create, live status (needs the `gh` CLI) |
-| **Agent orchestration** | Per-agent activity dot (idle/working/waiting), idle notifications, broadcast-to-many, per-agent model/prompt/flags, **logic arrows** that chain agents, right-click **Label box** to wrap an agent in a titled frame |
+| **Widgets** | Claude agent · Terminal · Transcript · File tree · Git panel · Editor (Monaco) · Markdown note |
+| **Agent orchestration** | Per-agent activity dot (idle/working/waiting), idle notifications, broadcast-to-many, per-agent model/prompt/flags |
+| **Context meter** | Each agent's bar shows how full its context window is (read from its session transcript), with a one-click **compact** past 70% |
+| **Plan usage** | The top-bar pill shows Claude's own session and weekly limit % with reset times, using your Claude Code sign-in (desktop app); falls back to a local token estimate |
 | **Agent roster** | Mission-control list of every agent across all tabs: status, cost/turns, last line, click-to-focus, and a composer to message one or broadcast to all |
 | **Tracking camera** | Follow an agent and watch every file it touches spawn as a viewer in an **orbit** around it, arrows pointing back; the camera stays framed on the action |
 | **Transcript widget** | An agent's *real* conversation rendered from its session JSONL: clean text + tool chips, free of terminal box-drawing chrome, following the session live |
@@ -91,33 +89,6 @@ backend isn't running; the footer pill shows `pty` (live) or `local`
 | **Tabs** | Multiple `.ccnvs` workspaces open at once, each bound to its own folder |
 | **Persistence** | Save/Open into the canvas folder (backend) or File System Access API; reusable widget-layout templates; PNG/SVG export |
 
-## Agent flows (logic arrows)
-
-An arrow drawn **from one agent to another** can carry orchestration logic, so a
-diagram of agents becomes a runnable pipeline. Select the connector and hit
-**+ add logic** in the selection bar:
-
-- **run when:** `on finish` (any completed turn) · `on success` · `on failure`
-  (keyword match on the source agent's last output) · `on match` (your regex).
-  For a reliable signal, tell the agent to end with a sentinel and match it,
-  e.g. `on match` + `STATUS:\s*OK`.
-- **prompt / pipe:** the text handed to the target agent (and submitted) when
-  the edge fires. **Leave it empty to pipe the source agent's output straight
-  into the target**, or embed that output inside a prompt with `{{output}}`
-  (e.g. `Review this and fix any bugs:\n\n{{output}}`). Multi-line text is pasted
-  intact. The piped output is the model's **actual last message**, read from the
-  Claude Code session transcript (`~/.claude/projects/…/<session>.jsonl`); if
-  that file isn't reachable it falls back to scraping the terminal.
-- **join:** when a target has several incoming edges, `all` waits for every
-  source to finish (AND, *"after these agents run, run this one"*) and `any`
-  fires on the first (OR).
-
-So a chain `A → B → C` with B set to *on success* and C to *on finish* runs B
-only if A reports success, then C after B; and a join `A, B → C` set to *all*
-runs C once both A and B are done. Flow edges render in the accent colour with a
-filled head and a condition badge. The whole thing has a kill switch (**Pause
-agent flows** in the command palette, ⌘K), and it auto-pauses if edges fire in a
-runaway loop.
 
 ## Watching agents work
 
@@ -153,13 +124,15 @@ to be a git repo.
 
 | Key | Action |
 | --- | --- |
-| `V` `H` `T` `P` `A` `R` `O` `F` `E` | select · pan · text · draw · arrow · rect · ellipse · frame · eraser |
+| drag empty canvas / `Shift`-drag | pan · box-select |
 | `Space` | quick-insert text or `/command` widget at the cursor |
-| ⌘/Ctrl + `K` | command palette |
+| ⌘/Ctrl + `K` | open / close the command palette |
 | ⌘/Ctrl + `F` | search this canvas |
-| `H` / middle-drag | pan |
+| drag empty canvas / middle-drag | pan |
 | ⌘/Ctrl + scroll | zoom to cursor |
 | ⌘/Ctrl + `S` / `O` / `N` | save · open · new canvas |
+| ⌘/Ctrl + `T` / `Shift T` | new terminal · new Claude agent |
+| ⌘/Ctrl + `W` | close the focused widget (quits the desktop app when none are left) |
 | ⌘/Ctrl + `Z` / `Shift Z` | undo · redo |
 | ⌘/Ctrl + `C` / `X` / `V` / `D` | copy · cut · paste · duplicate |
 | ⌘/Ctrl + `G` / `Shift G` | group · ungroup |
@@ -189,7 +162,6 @@ backend.
   bridge → graceful no-op by `isTauri()`.
 - **`src/lib/terminal.ts`**: terminal transport, choosing in-process Tauri PTY →
   WebSocket bridge → in-browser fallback shell.
-- **`src/lib/flow.ts`**: the agent-flow engine that fires logic arrows.
 - **`src/lib/transcript.ts`**: reads and parses Claude Code session JSONL (last
   turn for flow piping, touched files for the tracking camera, full conversation
   for the transcript widget).

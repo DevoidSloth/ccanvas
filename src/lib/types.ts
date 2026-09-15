@@ -261,21 +261,21 @@ export type Prompt = {
 }
 
 export const WIDGET_ACCENT: Record<WidgetKind, string> = {
-  terminal: '#e8795a',
-  agent: '#c89bd6',
-  web: '#6db5a8',
-  note: '#d8a657',
-  files: '#8bbf73',
-  diff: '#e8795a',
-  editor: '#7fc7c0',
-  doc: '#d8a657',
-  log: '#9a9892',
+  terminal: '#d97757',
+  agent: '#d97757',
+  web: '#58b4c9',
+  note: '#deb566',
+  files: '#5ab977',
+  diff: '#d97757',
+  editor: '#6cc3d1',
+  doc: '#deb566',
+  log: '#c2c0b6',
   pr: '#6d9be8',
-  issues: '#8bbf73',
-  runs: '#d8a657',
-  runner: '#8bbf73',
+  issues: '#5ab977',
+  runs: '#deb566',
+  runner: '#5ab977',
   sql: '#3ecf8e', // Supabase green
-  data: '#7fc7c0',
+  data: '#6cc3d1',
   plot: '#e89bc8',
   transcript: '#b9a8e0',
   video: '#e0708a',
@@ -285,13 +285,13 @@ export const WIDGET_ACCENT: Record<WidgetKind, string> = {
 
 /** Agent accent colours, each mapped to a valid Claude Code `/color` name. */
 export const AGENT_COLORS: { name: string; hex: string }[] = [
-  { name: 'default', hex: '#c89bd6' },
-  { name: 'red', hex: '#e8795a' },
-  { name: 'orange', hex: '#e8975a' },
-  { name: 'yellow', hex: '#d8a657' },
-  { name: 'green', hex: '#8bbf73' },
-  { name: 'cyan', hex: '#7fc7c0' },
-  { name: 'blue', hex: '#6d9be8' },
+  { name: 'default', hex: '#d97757' }, // Claude clay
+  { name: 'red', hex: '#e56b6f' },
+  { name: 'orange', hex: '#e3955c' },
+  { name: 'yellow', hex: '#deb566' },
+  { name: 'green', hex: '#7fb58a' },
+  { name: 'cyan', hex: '#6cc3d1' },
+  { name: 'blue', hex: '#7ea6c2' },
   { name: 'purple', hex: '#b07cd6' },
   { name: 'pink', hex: '#e89bc8' },
 ]
@@ -306,12 +306,12 @@ export const DEFAULT_CAMERA: Camera = { x: 0, y: 0, zoom: 1 }
 
 /** Drawing/ink palette shown in the props panel. First entry is the default. */
 export const PALETTE: string[] = [
-  '#e8e6e1', // ink
-  '#e8795a', // clay
-  '#6db5a8', // teal
-  '#d8a657', // amber
-  '#c89bd6', // violet
-  '#8bbf73', // green
+  '#faf9f5', // ink
+  '#d97757', // clay
+  '#58b4c9', // teal
+  '#deb566', // amber
+  '#b99ad6', // violet
+  '#5ab977', // green
 ]
 
 /** Stroke widths offered in the props panel. */

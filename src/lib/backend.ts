@@ -76,6 +76,24 @@ export async function getUsage(): Promise<Usage | null> {
   }
 }
 
+export type PlanLimit = { kind: string; percent: number; resetMs: number | null }
+export type PlanUsage = {
+  status: 'ok' | 'signed_out' | 'expired' | 'error'
+  plan: string | null
+  limits: PlanLimit[]
+}
+
+/** Claude's own plan usage (% of session / weekly limits) via the Claude Code
+ *  sign-in. Desktop app only; null in the browser. */
+export async function getPlanUsage(): Promise<PlanUsage | null> {
+  if (!isTauri()) return null
+  try {
+    return await invoke<PlanUsage>('claude_plan_usage')
+  } catch {
+    return null
+  }
+}
+
 /** Native folder dialog → absolute path (null if cancelled / unavailable). */
 export async function pickDir(): Promise<string | null> {
   if (isTauri()) {

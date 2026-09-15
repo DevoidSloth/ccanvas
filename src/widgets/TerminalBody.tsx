@@ -19,12 +19,14 @@ import {
   notify,
 } from '../lib/agents'
 import { onAgentTurnComplete, cleanAgentOutput } from '../lib/flow'
+import {
+  DEFAULT_THEME,
+  fontBase,
+  terminalFontFamily,
+  useTerminalProfile,
+} from '../lib/termProfile'
 
 type Mode = 'connecting' | 'pty' | 'local'
-
-// base font size; scaled up by the supersample factor when the canvas is
-// zoomed in so the terminal stays crisp under the world's CSS transform
-const BASE_FONT = 12.5
 
 // Terminal widget. Prefers a real shell — the in-process PTY under Tauri, or the
 // optional WebSocket bridge in the browser. Falls back to a tiny in-browser
@@ -62,11 +64,14 @@ export function TerminalBody({
   })
   // connect only once the terminal has actually been shown — opening/writing an
   // xterm on a hidden tab leaves its renderer blank. Once armed it stays armed,
-  // so the live shell persists when you switch away and back.
-  const [armed, setArmed] = useState(visible)
+  // so the live shell persists when you switch away and back. It also waits for
+  // the user's terminal profile so the xterm is created with their look.
+  const [shown, setShown] = useState(visible)
   useEffect(() => {
-    if (visible) setArmed(true)
+    if (visible) setShown(true)
   }, [visible])
+  const profile = useTerminalProfile()
+  const armed = shown && profile !== undefined
 
   const mutateElement = useStore((s) => s.mutateElement)
   const isAgent = el.kind === 'agent'
@@ -98,35 +103,14 @@ export function TerminalBody({
   useEffect(() => {
     if (!armed || !innerRef.current || !hostRef.current) return
     const term = new Terminal({
-      fontFamily: "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
-      fontSize: BASE_FONT * kRef.current,
-      lineHeight: 1.25,
-      cursorBlink: true,
-      cursorStyle: 'bar',
+      fontFamily: terminalFontFamily(profile),
+      fontSize: fontBase(profile) * kRef.current,
+      lineHeight: profile?.lineHeight ?? 1.25,
+      cursorBlink: profile?.cursorBlink ?? true,
+      cursorStyle: profile?.cursorStyle ?? 'bar',
+      drawBoldTextInBrightColors: profile?.boldIsBright ?? true,
       allowProposedApi: true,
-      theme: {
-        background: '#0a0b0d',
-        foreground: '#e8e6e1',
-        cursor: '#e8795a',
-        cursorAccent: '#0a0b0d',
-        selectionBackground: 'rgba(232,121,90,0.25)',
-        black: '#1a1d24',
-        red: '#e8795a',
-        green: '#8bbf73',
-        yellow: '#d8a657',
-        blue: '#6db5a8',
-        magenta: '#c89bd6',
-        cyan: '#7fc7c0',
-        white: '#c8c6c0',
-        brightBlack: '#61605b',
-        brightRed: '#f08e72',
-        brightGreen: '#a6d189',
-        brightYellow: '#e5c07b',
-        brightBlue: '#82c7bb',
-        brightMagenta: '#d9b3e3',
-        brightCyan: '#98d4cd',
-        brightWhite: '#e8e6e1',
-      },
+      theme: { ...DEFAULT_THEME, ...profile?.theme },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -602,7 +586,7 @@ export function TerminalBody({
 
   useEffect(() => {
     if (active) termRef.current?.focus()
-  }, [active])
+  }, [active, armed])
 
   // Match the supersample factor to the live zoom (debounced so the font only
   // re-measures once the gesture settles, not every frame). xterm maps a click
@@ -637,7 +621,7 @@ export function TerminalBody({
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    term.options.fontSize = BASE_FONT * k
+    term.options.fontSize = fontBase(profile) * k
     const raf = requestAnimationFrame(() => {
       try {
         fitRef.current?.fit()
@@ -696,7 +680,11 @@ export function TerminalBody({
   }
 
   return (
-    <div className="term" onContextMenu={onContextMenu}>
+    <div
+      className="term"
+      style={{ background: profile?.theme.background ?? DEFAULT_THEME.background }}
+      onContextMenu={onContextMenu}
+    >
       <div ref={hostRef} className="term__screen">
         <div
           ref={innerRef}

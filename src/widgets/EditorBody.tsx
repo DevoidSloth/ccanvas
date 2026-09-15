@@ -79,7 +79,7 @@ export function EditorBody({ el, active }: { el: WidgetElement; active: boolean 
         theme: 'ccanvas',
         automaticLayout: true, // re-layout when the widget is resized
         minimap: { enabled: false }, // kept lean — core editing surface only
-        fontFamily: "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
+        fontFamily: "'Spline Sans Mono', ui-monospace, 'SF Mono', Menlo, monospace",
         fontSize: 12.5,
         lineHeight: 19,
         fontLigatures: true,

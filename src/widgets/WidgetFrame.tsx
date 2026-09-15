@@ -29,6 +29,7 @@ import {
   IconInfo,
 } from '../ui/icons'
 import { useAgents, sendTo, sendPrompt, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
+import { useAgentContext } from '../lib/context'
 import { NoteBody } from './NoteBody'
 import { WebBody } from './WebBody'
 import { TerminalBody } from './TerminalBody'
@@ -278,6 +279,7 @@ export function WidgetFrame({
       className={`widget${selected ? ' widget--selected' : ''}${
         active ? ' widget--active' : ''
       }`}
+      data-widget-id={el.id}
       style={
         {
           left: el.x,
@@ -328,6 +330,7 @@ export function WidgetFrame({
           </span>
         )}
         {el.kind === 'agent' && <AgentMeter id={el.id} />}
+        {el.kind === 'agent' && <ContextMeter el={el} />}
         <span className="widget__bar-spacer" />
         <div className="widget__actions">
           {el.kind === 'agent' && (
@@ -446,6 +449,43 @@ function AgentDot({ id }: { id: string }) {
           ? 'connecting…'
           : 'idle'
   return <span className={`agent-dot agent-dot--${status}`} title={title} />
+}
+
+// Context meter: a short fill bar + % of the context window, with a one-click
+// /compact once the conversation is getting full.
+const COMPACT_AT = 70
+function fmtK(n: number) {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}K`
+}
+function ContextMeter({ el }: { el: WidgetElement }) {
+  const ctx = useAgentContext(el.cwd, el.sessionId, el.model)
+  if (!ctx) return null
+  const pct = Math.round(ctx.pct)
+  const level = pct >= 85 ? 'hot' : pct >= COMPACT_AT ? 'warm' : 'ok'
+  return (
+    <span
+      className={`ctx ctx--${level}`}
+      title={`Context: ${fmtK(ctx.used)} of ${fmtK(ctx.window)} tokens (${pct}%)`}
+    >
+      <span className="ctx__bar">
+        <span className="ctx__fill" style={{ width: `${ctx.pct}%` }} />
+      </span>
+      <span className="ctx__pct">{pct}%</span>
+      {pct >= COMPACT_AT && (
+        <button
+          className="ctx__compact"
+          title="Summarize the conversation to free up context (/compact)"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            sendPrompt(el.id, '/compact')
+          }}
+        >
+          compact
+        </button>
+      )}
+    </span>
+  )
 }
 
 // Compact activity meter: turns · active time · scraped cost (run /cost to fill).
