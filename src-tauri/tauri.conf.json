@@ -19,7 +19,10 @@
         "minHeight": 480,
         "resizable": true,
         "fullscreen": false,
-        "theme": "Dark"
+        "theme": "Dark",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 14, "y": 18 }
       }
     ],
     "security": {

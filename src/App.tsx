@@ -1,18 +1,18 @@
 import { useEffect } from 'react'
+import { viewport, viewCenter, orderedTerminals, focusWidget, cycleTerminal, exitTerminal } from './lib/view'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isTauri } from './lib/backend'
 import { useStore, selectActive } from './store/workspace'
 import { zoomAt, screenToWorld } from './lib/geometry'
 import { TopBar } from './ui/TopBar'
-import { Tabs } from './ui/Tabs'
+import { TermNumbers } from './ui/TermNumbers'
 import { Canvas } from './canvas/Canvas'
 import { Toolbar } from './ui/Toolbar'
 import { Hud } from './ui/Hud'
 import { Welcome } from './ui/Welcome'
 import { SelectionBar } from './ui/SelectionBar'
 import { CommandPalette } from './ui/CommandPalette'
-import { Minimap } from './ui/Minimap'
 import { AgentWizard } from './ui/AgentWizard'
 import { AttentionBar } from './ui/AttentionBar'
 import { Presentation } from './ui/Presentation'
@@ -25,14 +25,8 @@ import { CanvasSearch } from './ui/CanvasSearch'
 import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
 
-// topbar (44) + tabs (38); keep in sync with --topbar-h / --tabs-h in global.css
-const CHROME_H = 82
-
-
 // Anchor zooms at the centre of the canvas area (below the chrome).
-function canvasCenter() {
-  return { x: window.innerWidth / 2, y: (window.innerHeight - CHROME_H) / 2 }
-}
+const canvasCenter = viewCenter
 function worldCenter() {
   return screenToWorld(canvasCenter(), selectActive(useStore.getState()).camera)
 }
@@ -68,6 +62,41 @@ function closeCurrentWidget() {
 export default function App() {
   const tool = useStore((s) => s.tool)
   const openPanel = useStore((s) => s.openPanel)
+
+  // Terminal navigation runs in the capture phase, ahead of xterm, so the keys
+  // work while you're typing in a terminal and never reach the shell:
+  //   ⌘1–9     jump to the Nth terminal (reading order) and click into it
+  //   ⌘⇧] / ⌘⇧[  next / previous terminal
+  //   ⌘Esc     click out of the current terminal
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return
+      if (e.altKey) return
+      const stop = () => {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      if (!e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+        const t = orderedTerminals()[Number(e.code.slice(5)) - 1]
+        if (t) {
+          stop()
+          focusWidget(t.id)
+        }
+        return
+      }
+      if (e.shiftKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+        stop()
+        cycleTerminal(e.code === 'BracketRight' ? 1 : -1)
+        return
+      }
+      if (e.key === 'Escape' && useStore.getState().activeWidgetId) {
+        stop()
+        exitTerminal()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -197,7 +226,7 @@ export default function App() {
       // focus / zoom to the current selection
       if (e.key === '\\') {
         e.preventDefault()
-        store.zoomToSelection(window.innerWidth, window.innerHeight - CHROME_H)
+        store.zoomToSelection(viewport().vw, viewport().vh)
         return
       }
     }
@@ -274,15 +303,14 @@ export default function App() {
   return (
     <div className="app" data-tool={tool}>
       <TopBar />
-      <Tabs />
       <main className="app__main">
         <Canvas />
+        <TermNumbers />
         <Welcome />
         <Toolbar />
         <SelectionBar />
         <AttentionBar />
         <TrackingBar />
-        <Minimap />
         <Hud />
         <CommandPalette />
         <CanvasSearch />

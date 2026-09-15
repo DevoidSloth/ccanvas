@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { viewCenter } from '../lib/view'
 import { useStore } from '../store/workspace'
 import { useAgents, sendPrompt } from '../lib/agents'
 import { readTranscript, extractLastAssistant } from '../lib/transcript'
@@ -6,7 +7,6 @@ import type { WidgetElement, Workspace } from '../lib/types'
 import { IconClose, IconBroadcast, IconTrack } from './icons'
 import '../styles/agent-tools.css'
 
-const CHROME_H = 82
 
 type Row = { agent: WidgetElement; tab: Workspace }
 
@@ -86,8 +86,8 @@ export function Roster() {
     const cy = row.agent.y + row.agent.h / 2
     setCamera({
       zoom: cam.zoom,
-      x: window.innerWidth / 2 - cx * cam.zoom,
-      y: (window.innerHeight - CHROME_H) / 2 - cy * cam.zoom,
+      x: viewCenter().x - cx * cam.zoom,
+      y: viewCenter().y - cy * cam.zoom,
     })
     setSelection([row.agent.id])
     setActiveWidget(row.agent.id)

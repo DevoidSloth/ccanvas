@@ -220,6 +220,8 @@ export type Workspace = {
   dir?: string
   /** unsaved changes since last disk write */
   dirty?: boolean
+  /** pinned tabs sit first in the tab strip and can't be closed until unpinned */
+  pinned?: boolean
 }
 
 /** On-disk shape of a .ccnvs file */

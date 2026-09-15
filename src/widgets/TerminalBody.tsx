@@ -28,6 +28,37 @@ import {
 
 type Mode = 'connecting' | 'pty' | 'local'
 
+// xterm maps a pointer to a cell as (clientY - rect.top) / cssCellHeight, where
+// the rect is post-transform but the cell size isn't. Whenever the terminal's
+// net on-screen scale isn't 1 — canvas zoomed below 100% (k is floored at 1),
+// or mid-gesture before the debounced k catches up — clicks and selections land
+// on the wrong row/column. Undo the scale before xterm sees the event. The
+// mouse service is a shared instance, so this covers selection, links and
+// mouse reporting alike.
+type Pt = { clientX: number; clientY: number }
+function patchMouseScale(term: Terminal) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ms = (term as any)._core?._mouseService
+  if (!ms || ms.__scalePatched) return
+  const unscale = <E extends Pt>(ev: E, element: HTMLElement): E => {
+    const r = element.getBoundingClientRect()
+    const sx = element.offsetWidth ? r.width / element.offsetWidth : 1
+    const sy = element.offsetHeight ? r.height / element.offsetHeight : 1
+    if (Math.abs(sx - 1) < 1e-3 && Math.abs(sy - 1) < 1e-3) return ev
+    return {
+      clientX: r.left + (ev.clientX - r.left) / sx,
+      clientY: r.top + (ev.clientY - r.top) / sy,
+    } as E
+  }
+  const getCoords = ms.getCoords.bind(ms)
+  const getReport = ms.getMouseReportCoords.bind(ms)
+  ms.getCoords = (ev: Pt, element: HTMLElement, ...rest: unknown[]) =>
+    getCoords(unscale(ev, element), element, ...rest)
+  ms.getMouseReportCoords = (ev: MouseEvent, element: HTMLElement) =>
+    getReport(unscale(ev, element), element)
+  ms.__scalePatched = true
+}
+
 // Terminal widget. Prefers a real shell — the in-process PTY under Tauri, or the
 // optional WebSocket bridge in the browser. Falls back to a tiny in-browser
 // shell when neither is available. Agent widgets auto-launch `claude`.
@@ -117,6 +148,7 @@ export function TerminalBody({
     term.open(innerRef.current)
     termRef.current = term
     fitRef.current = fit
+    patchMouseScale(term)
 
     // ---- clickable filenames ----
     // Underline any openable file path in the output and, on click, open it in
@@ -459,8 +491,9 @@ export function TerminalBody({
       idleTimer = setTimeout(() => {
         const waiting = looksLikePrompt(tail)
         setAgentStatus(el.id, waiting ? 'waiting' : 'idle')
-        // surface the last meaningful line for the agent roster
-        if (isAgent) {
+        // surface the last meaningful line for the agent roster and the
+        // zoomed-out terminal card
+        {
           const last = cleanAgentOutput(tail).split('\n').filter(Boolean).pop()
           if (last) useAgents.getState().setLastLine(el.id, last.slice(0, 160))
         }
@@ -585,7 +618,9 @@ export function TerminalBody({
   }, [armed, attempt])
 
   useEffect(() => {
+    // clicked out → stop taking keystrokes
     if (active) termRef.current?.focus()
+    else termRef.current?.blur()
   }, [active, armed])
 
   // Match the supersample factor to the live zoom (debounced so the font only

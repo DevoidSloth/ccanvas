@@ -11,7 +11,7 @@ import type {
   Template,
   Prompt,
 } from '../lib/types'
-import { DEFAULT_CAMERA, PALETTE, WIDGET_ACCENT } from '../lib/types'
+import { AGENT_COLORS, DEFAULT_CAMERA, PALETTE, WIDGET_ACCENT } from '../lib/types'
 import { boundsOfMany, clamp, elementBounds, translated } from '../lib/geometry'
 import { newId } from '../lib/id'
 import {
@@ -177,6 +177,12 @@ export type Store = {
   /** widget whose body currently receives pointer input (iframe/terminal) */
   activeWidgetId: string | null
   editingTextId: string | null
+  /** terminal/agent whose label (name + colour) popover is open */
+  labelingWidgetId: string | null
+  setLabelingWidget: (id: string | null) => void
+  /** colour tags (lowercase hex) to show; other widgets are dimmed. null = all */
+  labelFilter: string[] | null
+  setLabelFilter: (f: string[] | null) => void
   templates: Template[]
   /** reusable prompt snippets (prompt library) */
   prompts: Prompt[]
@@ -207,6 +213,8 @@ export type Store = {
   closeTab: (id: string) => void
   switchTab: (id: string) => void
   renameTab: (id: string, name: string) => void
+  /** pin/unpin a tab; pinned tabs are kept together at the front */
+  togglePinTab: (id: string) => void
   setActiveDir: () => Promise<void>
   openFile: () => Promise<void>
   saveActive: (forceDialog?: boolean) => Promise<void>
@@ -270,6 +278,9 @@ export type Store = {
   align: (mode: AlignMode) => void
   distribute: (axis: 'h' | 'v') => void
   tidy: () => void
+  /** lay out the tab's terminals + agents (or just the selected ones) in rows,
+   *  grouped by colour tag or by working folder */
+  arrangeTerminals: (by: 'label' | 'folder') => void
 
   // ----- templates -----
   saveTemplate: (name: string) => void
@@ -332,6 +343,8 @@ export const useStore = create<Store>((set, get) => ({
   selection: [],
   activeWidgetId: null,
   editingTextId: null,
+  labelingWidgetId: null,
+  labelFilter: null,
   templates: loadTemplates(),
   prompts: loadPrompts(),
   paletteOpen: false,
@@ -398,7 +411,7 @@ export const useStore = create<Store>((set, get) => ({
     ws.elements = [el]
     // frame the widget in the middle of the viewport, zoomed to fit
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
-    const vh = typeof window !== 'undefined' ? window.innerHeight - 82 : 720
+    const vh = typeof window !== 'undefined' ? window.innerHeight - 38 : 720
     const pad = 60
     const zoom = clamp(Math.min(vw / (w + pad * 2), vh / (h + pad * 2)), 0.3, 1)
     ws.camera = { zoom, x: vw / 2, y: vh / 2 }
@@ -433,6 +446,7 @@ export const useStore = create<Store>((set, get) => ({
   closeTab: (id) => {
     // closing a tab discards its widgets for good — end their shells too
     const tab = get().tabs.find((t) => t.id === id)
+    if (tab?.pinned) return // unpin first
     const trackId = get().trackingAgentId
     if (tab) {
       if (trackId && tab.elements.some((e) => e.id === trackId))
@@ -464,16 +478,37 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   switchTab: (id) =>
-    set({ activeTabId: id, selection: [], activeWidgetId: null, editingTextId: null }),
+    set({
+      activeTabId: id,
+      selection: [],
+      activeWidgetId: null,
+      editingTextId: null,
+      labelFilter: null,
+    }),
 
   renameTab: (id, name) =>
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, name, dirty: true } : t)),
     })),
 
+  togglePinTab: (id) =>
+    set((s) => {
+      const me = s.tabs.find((t) => t.id === id)
+      if (!me) return s
+      const next = { ...me, pinned: !me.pinned }
+      const pinned = s.tabs.filter((t) => t.pinned && t.id !== id)
+      const rest = s.tabs.filter((t) => !t.pinned && t.id !== id)
+      // pinned tabs stay together at the front: a newly pinned tab joins the
+      // end of that group, an unpinned one leads the rest
+      return { tabs: [...pinned, next, ...rest] }
+    }),
+
   openFile: async () => {
     let ws: Workspace | null = null
     if (await backendOnline()) {
+      // a tab with no folder yet (e.g. untitled): ⌘O picks its folder. The
+      // native .ccnvs dialog greys out folders, so this is the only way in.
+      if (!get().active()?.dir) return get().setActiveDir()
       const f = await pickFile()
       if (!f) return
       try {
@@ -859,6 +894,8 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveWidget: (id) => set({ activeWidgetId: id }),
   setEditingText: (id) => set({ editingTextId: id }),
+  setLabelingWidget: (id) => set({ labelingWidgetId: id }),
+  setLabelFilter: (f) => set({ labelFilter: f && f.length ? f : null }),
 
   // ---------- arrange: clipboard ----------
   copySelection: () => {
@@ -1092,6 +1129,75 @@ export const useStore = create<Store>((set, get) => ({
         elements: w.elements.map((e) => {
           const m = moves.get(e.id)
           return m && !e.locked ? translated(e, m.dx, m.dy) : e
+        }),
+      })),
+    )
+  },
+
+  arrangeTerminals: (by) => {
+    const ws = get().active()
+    if (!ws) return
+    const isTerm = (e: CanvasElement): e is WidgetElement =>
+      e.type === 'widget' && (e.kind === 'terminal' || e.kind === 'agent') && !e.locked
+    const all = ws.elements.filter(isTerm)
+    const picked = all.filter((e) => get().selection.includes(e.id))
+    const terms = picked.length >= 2 ? picked : all
+    if (!terms.length) return
+
+    // group: colour tags in palette order (untagged last), or folders A→Z
+    const keyOf = (t: WidgetElement) =>
+      by === 'label' ? (t.color ?? '').toLowerCase() : (t.cwd ?? ws.dir ?? '')
+    const rank = (k: string) => {
+      if (by === 'folder') return 0
+      if (!k) return AGENT_COLORS.length + 1
+      const i = AGENT_COLORS.findIndex((c) => c.hex.toLowerCase() === k)
+      return i < 0 ? AGENT_COLORS.length : i
+    }
+    const groups = new Map<string, WidgetElement[]>()
+    for (const t of [...terms].sort((a, b) => a.y - b.y || a.x - b.x)) {
+      const k = keyOf(t)
+      groups.set(k, [...(groups.get(k) ?? []), t])
+    }
+    const ordered = [...groups.entries()].sort(
+      ([a], [b]) => rank(a) - rank(b) || a.localeCompare(b),
+    )
+
+    // shelf-pack: each group starts a new row and wraps at a width that keeps
+    // the whole layout roughly as wide as it is tall
+    const gap = 40
+    const avgW = terms.reduce((n, t) => n + t.w, 0) / terms.length
+    const cols = Math.max(1, Math.ceil(Math.sqrt(terms.length * 1.4)))
+    const maxRowW = cols * (avgW + gap)
+    const origin = boundsOfMany(terms)!
+    const moves = new Map<string, { dx: number; dy: number }>()
+    let y = origin.y
+    for (const [, items] of ordered) {
+      let x = origin.x
+      let rowH = 0
+      for (const t of items) {
+        if (x > origin.x && x - origin.x + t.w > maxRowW) {
+          y += rowH + gap
+          x = origin.x
+          rowH = 0
+        }
+        moves.set(t.id, { dx: x - t.x, dy: y - t.y })
+        x += t.w + gap
+        rowH = Math.max(rowH, t.h)
+      }
+      y += rowH + gap * 2 // a wider gutter between groups
+    }
+    // label boxes (frame + name) wrapped around a widget travel with it
+    for (const e of ws.elements)
+      if (e.labelFor && moves.has(e.labelFor)) moves.set(e.id, moves.get(e.labelFor)!)
+
+    get().beginHistory()
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: w.elements.map((e) => {
+          const m = moves.get(e.id)
+          return m ? translated(e, m.dx, m.dy) : e
         }),
       })),
     )

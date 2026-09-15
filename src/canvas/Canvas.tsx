@@ -116,6 +116,16 @@ const REGISTRATION_CROSS = `url("data:image/svg+xml,${encodeURIComponent(
   "<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><path d='M7 1v12M1 7h12' stroke='rgb(250,249,245)' stroke-opacity='0.09' stroke-width='1'/></svg>",
 )}")`
 
+/** a terminal/agent widget that isn't the one currently clicked into */
+function isIdleTerminal(node: HTMLElement | null): boolean {
+  const id = node?.dataset.widgetId
+  if (!id) return false
+  const st = useStore.getState()
+  if (st.activeWidgetId === id) return false
+  const el = selectActive(st).elements.find((e) => e.id === id)
+  return el?.type === 'widget' && (el.kind === 'terminal' || el.kind === 'agent')
+}
+
 export function Canvas() {
   const rootRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<Drag>(null)
@@ -196,9 +206,11 @@ export function Canvas() {
     if (!node) return
     const onWheel = (e: WheelEvent) => {
       const zoomGesture = e.ctrlKey || e.metaKey
-      const overWidget = !!(e.target as HTMLElement | null)?.closest?.('.widget')
-      // plain scroll over a widget → let that widget scroll its own content
-      if (overWidget && !zoomGesture) return
+      const widgetNode = (e.target as HTMLElement | null)?.closest?.('.widget') as HTMLElement | null
+      const overWidget = !!widgetNode
+      // plain scroll over a widget → let that widget scroll its own content,
+      // except a terminal you haven't clicked into: that scroll moves the canvas
+      if (overWidget && !zoomGesture && !isIdleTerminal(widgetNode)) return
       e.preventDefault()
       // zooming while hovering a widget: don't also scroll the widget under it
       if (overWidget) e.stopPropagation()
@@ -265,6 +277,10 @@ export function Canvas() {
     // a path-bearing widget (files/editor/doc/log/diff) → reveal it on disk
     if (lone?.type === 'widget') {
       const w = lone as WidgetElement
+      if (w.kind === 'terminal' || w.kind === 'agent') {
+        items.push({ label: 'Label…', onClick: () => s().setLabelingWidget(w.id) })
+        items.push({ separator: true })
+      }
       const p = w.path || w.cwd
       if (p) {
         items.push({
@@ -1011,6 +1027,8 @@ export function Canvas() {
             className="canvas__world"
             style={{
               transform: `translate(${tab.camera.x}px, ${tab.camera.y}px) scale(${tab.camera.zoom})`,
+              // lets zoomed-out terminal cards size their text in screen px
+              ['--z' as string]: tab.camera.zoom,
               // hidden (not display:none) so xterm keeps real dimensions and
               // renders correctly even on inactive tabs — it just stays invisible
               visibility: isActiveTab ? undefined : 'hidden',

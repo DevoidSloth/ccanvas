@@ -255,6 +255,13 @@ export const IconLock = (p: P) => (
   </S>
 )
 
+export const IconTag = (p: P) => (
+  <S {...p}>
+    <path d="M4 4h7.2L20 12.8 12.8 20 4 11.2z" />
+    <circle cx="8.3" cy="8.3" r="1.2" />
+  </S>
+)
+
 export const IconUnlock = (p: P) => (
   <S {...p}>
     <rect x="5" y="10.5" width="14" height="9" rx="1.5" />
@@ -454,21 +461,33 @@ export const IconMark = (p: P) => (
     style={{ display: 'block' }}
     className={p.className}
   >
-    {/* two nested "c" patch cables: outer ends in a jack, inner in a lit LED
-        (same geometry as src-tauri/icons/source/ccanvas.svg, without the plate) */}
+    {/* a canvas of three panes: the clay one is the live Claude terminal
+        (same layout as src-tauri/icons/source/ccanvas.svg, without the plate) */}
+    <rect x="2.5" y="2.5" width="11.5" height="11.5" rx="2.6" fill="var(--accent, #d97757)" />
     <path
-      d="M17.46 5.49A8.5 8.5 0 1 0 17.46 18.51"
-      stroke="var(--ink, #faf9f5)"
-      strokeWidth="2.2"
+      d="M5.6 6.1l2.8 2.15-2.8 2.15M9.7 10.45h1.9"
+      stroke="var(--bg, #1f1e1d)"
+      strokeWidth="1.6"
       strokeLinecap="round"
+      strokeLinejoin="round"
     />
-    <circle cx="17.46" cy="5.49" r="1.7" fill="var(--bg, #1f1e1d)" stroke="var(--ink, #faf9f5)" strokeWidth="1" />
-    <path
-      d="M14.7 8.78A4.2 4.2 0 1 0 14.7 15.22"
-      stroke="var(--accent, #d97757)"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-    />
-    <circle cx="14.7" cy="15.22" r="0.9" fill="#fbe3d8" />
+    <rect x="16.75" y="3.25" width="4" height="10" rx="1.5" stroke="var(--ink-dim, #c2c0b6)" strokeWidth="1.5" />
+    <rect x="3.25" y="16.75" width="17.5" height="4" rx="1.5" stroke="var(--ink-dim, #c2c0b6)" strokeWidth="1.5" />
   </svg>
+)
+
+// Folded map — the minimap toggle.
+export const IconMap = (p: P) => (
+  <S {...p}>
+    <path d="M9 4.5L3.5 6.5v13L9 17.5l6 2 5.5-2v-13L15 6.5l-6-2z" />
+    <path d="M9 4.5v13M15 6.5v13" />
+  </S>
+)
+
+// Push pin — pinned tabs.
+export const IconPin = (p: P) => (
+  <S {...p}>
+    <path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5z" />
+    <path d="M12 14v6" />
+  </S>
 )

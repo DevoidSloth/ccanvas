@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { viewCenter } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { useAgents, sendTo } from '../lib/agents'
 import type { WidgetElement } from '../lib/types'
@@ -7,7 +8,6 @@ import type { WidgetElement } from '../lib/types'
 // (detected from their output); clicking one jumps to it. Quick yes/enter
 // lets you clear a prompt without leaving the inbox.
 
-const CHROME_H = 82
 
 export function AttentionBar() {
   const status = useAgents((s) => s.status)
@@ -29,8 +29,8 @@ export function AttentionBar() {
     const cy = el.y + el.h / 2
     setCamera({
       zoom: cam.zoom,
-      x: window.innerWidth / 2 - cx * cam.zoom,
-      y: (window.innerHeight - CHROME_H) / 2 - cy * cam.zoom,
+      x: viewCenter().x - cx * cam.zoom,
+      y: viewCenter().y - cy * cam.zoom,
     })
     setSelection([el.id])
     setActiveWidget(el.id)

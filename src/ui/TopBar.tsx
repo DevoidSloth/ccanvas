@@ -1,27 +1,203 @@
+import { useState } from 'react'
 import { useStore, selectActive } from '../store/workspace'
-import { baseName } from '../lib/backend'
+import { baseName, isTauri } from '../lib/backend'
+import { AGENT_COLORS, type WidgetElement } from '../lib/types'
+import { isTermWidget } from '../lib/view'
 import {
   IconMark,
   IconFolder,
-  IconSave,
   IconPlus,
+  IconClose,
   IconSearch,
   IconAgent,
   IconChat,
   IconHistory,
   IconFollow,
   IconClaude,
+  IconPin,
 } from './icons'
 import { UsagePill } from './UsagePill'
+import { openContextMenu } from './ContextMenu'
 
+// On macOS the window's title bar is overlaid by this bar, so leave room for
+// the traffic lights and let empty bar space drag the window.
+const MAC_OVERLAY = isTauri() && /Mac/i.test(navigator.userAgent)
+
+// One slim bar: logo · tabs · (drag space) · folder · label filter · tools.
+// Open / Save / New live on ⌘O / ⌘S / ⌘N and in the command palette.
 export function TopBar() {
   const ws = useStore(selectActive)
-  const tabs = useStore((s) => s.tabs)
-  const newTab = useStore((s) => s.newTab)
-  const openFile = useStore((s) => s.openFile)
-  const saveActive = useStore((s) => s.saveActive)
   const setActiveDir = useStore((s) => s.setActiveDir)
   const setPaletteOpen = useStore((s) => s.setPaletteOpen)
+
+  return (
+    <header
+      className={`topbar${MAC_OVERLAY ? ' topbar--mac' : ''}`}
+      data-tauri-drag-region
+    >
+      <span className="brand" title="ccanvas">
+        <IconMark />
+      </span>
+
+      <Tabs />
+
+      <div className="topbar__spacer" data-tauri-drag-region />
+
+      <button
+        className={`tb-chip${ws.dir ? '' : ' tb-chip--unset'}`}
+        title={ws.dir ? `Canvas folder: ${ws.dir}\nClick to change` : 'Bind this canvas to a folder'}
+        onClick={() => void setActiveDir()}
+      >
+        <IconFolder />
+        <span className="tb-chip__name">{ws.dir ? baseName(ws.dir) : 'set folder'}</span>
+      </button>
+
+      <LabelFilter />
+      <Tools />
+      <UsagePill />
+      <button className="tb-icon" onClick={() => setPaletteOpen(true)} title="Commands (⌘K)">
+        <IconSearch />
+      </button>
+    </header>
+  )
+}
+
+function Tabs() {
+  const tabs = useStore((s) => s.tabs)
+  const activeTabId = useStore((s) => s.activeTabId)
+  const switchTab = useStore((s) => s.switchTab)
+  const closeTab = useStore((s) => s.closeTab)
+  const newTab = useStore((s) => s.newTab)
+  const renameTab = useStore((s) => s.renameTab)
+  const togglePinTab = useStore((s) => s.togglePinTab)
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  const tabMenu = (e: React.MouseEvent, id: string, pinned: boolean) =>
+    openContextMenu(e, [
+      { label: pinned ? 'Unpin tab' : 'Pin tab', icon: <IconPin />, onClick: () => togglePinTab(id) },
+      { label: 'Rename', onClick: () => setEditingId(id) },
+      { separator: true },
+      {
+        label: 'Close tab',
+        danger: true,
+        disabled: pinned,
+        hint: pinned ? 'unpin first' : undefined,
+        onClick: () => closeTab(id),
+      },
+    ])
+
+  return (
+    <div className="tabs">
+      {tabs.map((t, i) => (
+        <div
+          key={t.id}
+          className={`tab${t.id === activeTabId ? ' tab--active' : ''}${
+            t.pinned ? ' tab--pinned' : ''
+          }${t.pinned && !tabs[i + 1]?.pinned ? ' tab--pinned-last' : ''}`}
+          onPointerDown={() => switchTab(t.id)}
+          onDoubleClick={() => setEditingId(t.id)}
+          onContextMenu={(e) => tabMenu(e, t.id, !!t.pinned)}
+          title={`${t.name}${t.pinned ? ' · pinned' : ''}${t.dirty ? ' — unsaved (⌘S)' : ''}`}
+        >
+          {t.pinned && editingId !== t.id && (
+            <span className="tab__pin">
+              <IconPin />
+            </span>
+          )}
+          {editingId === t.id ? (
+            <input
+              className="tab__name-input"
+              defaultValue={t.name}
+              autoFocus
+              onPointerDown={(e) => e.stopPropagation()}
+              onBlur={(e) => {
+                renameTab(t.id, e.target.value.trim() || t.name)
+                setEditingId(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                if (e.key === 'Escape') setEditingId(null)
+              }}
+            />
+          ) : (
+            <span className="tab__name">{t.name}</span>
+          )}
+          {t.dirty && <span className="tab__dirty" />}
+          {!t.pinned && (
+            <button
+              className="tab__close"
+              title="Close tab"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                closeTab(t.id)
+              }}
+            >
+              <IconClose />
+            </button>
+          )}
+        </div>
+      ))}
+      <button className="tab-add" title="New canvas (⌘N)" onClick={() => void newTab()}>
+        <IconPlus />
+      </button>
+    </div>
+  )
+}
+
+// Show only terminals carrying these colour tags; the rest dim. Click a dot to
+// solo that colour (click again to clear), ⇧-click to add or remove it.
+function LabelFilter() {
+  const elements = useStore((s) => selectActive(s).elements)
+  const filter = useStore((s) => s.labelFilter)
+  const setLabelFilter = useStore((s) => s.setLabelFilter)
+
+  const present = new Set(
+    elements
+      .filter((e): e is WidgetElement => isTermWidget(e) && !!e.color)
+      .map((e) => e.color!.toLowerCase()),
+  )
+  const colors = AGENT_COLORS.filter((c) => present.has(c.hex.toLowerCase()))
+  // colours tagged with a hex outside the palette still get a dot
+  for (const hex of present)
+    if (!colors.some((c) => c.hex.toLowerCase() === hex)) colors.push({ name: hex, hex })
+  if (colors.length === 0) return null
+
+  const toggle = (hex: string, additive: boolean) => {
+    const cur = filter ?? []
+    if (additive)
+      setLabelFilter(cur.includes(hex) ? cur.filter((h) => h !== hex) : [...cur, hex])
+    else setLabelFilter(cur.length === 1 && cur[0] === hex ? null : [hex])
+  }
+
+  return (
+    <div className={`lfilter${filter ? ' lfilter--on' : ''}`} title="Filter terminals by label">
+      {colors.map((c) => {
+        const hex = c.hex.toLowerCase()
+        const on = !!filter?.includes(hex)
+        return (
+          <button
+            key={hex}
+            className={`lfilter__dot${on ? ' lfilter__dot--on' : ''}${
+              filter && !on ? ' lfilter__dot--off' : ''
+            }`}
+            style={{ '--k': c.hex } as React.CSSProperties}
+            title={`${on ? 'Hide' : 'Show only'} ${c.name} terminals (⇧-click to combine)`}
+            onClick={(e) => toggle(hex, e.shiftKey)}
+          />
+        )
+      })}
+      {filter && (
+        <button className="lfilter__clear" title="Show all terminals" onClick={() => setLabelFilter(null)}>
+          <IconClose />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function Tools() {
+  const tabs = useStore((s) => s.tabs)
   const openPanel = useStore((s) => s.openPanel)
   const togglePanel = useStore((s) => s.togglePanel)
   const followAgent = useStore((s) => s.followAgent)
@@ -31,86 +207,46 @@ export function TopBar() {
     (n, t) => n + t.elements.filter((e) => e.type === 'widget' && e.kind === 'agent').length,
     0,
   )
+  const on = (b: boolean) => `tb-icon${b ? ' tb-icon--on' : ''}`
 
   return (
-    <header className="topbar">
-      <div className="brand">
-        <span className="brand__mark">
-          <IconMark />
-        </span>
-        <span className="brand__name">ccanvas</span>
-      </div>
-
+    <div className="topbar__tools">
       <button
-        className={`tb-btn topbar__folder${ws.dir ? '' : ' topbar__folder--unset'}`}
-        title={ws.dir ? `Canvas folder: ${ws.dir}\nClick to change` : 'Bind this canvas to a folder'}
-        onClick={() => void setActiveDir()}
+        className={on(openPanel === 'roster')}
+        title="Agents: every agent across your tabs, with status and a composer"
+        onClick={() => togglePanel('roster')}
       >
-        <IconFolder />
-        <span className="topbar__folder-name">{ws.dir ? baseName(ws.dir) : 'set folder'}</span>
+        <IconAgent />
+        {agentCount > 0 && <span className="tb-icon__badge">{agentCount}</span>}
       </button>
-
-      <div className="topbar__tools">
-        <button
-          className={`tb-tool${openPanel === 'roster' ? ' tb-tool--on' : ''}`}
-          title="Every agent across your tabs: status, last message, and a composer to message them"
-          onClick={() => togglePanel('roster')}
-        >
-          <IconAgent />
-          <span className="tb-tool__label">Agents</span>
-          {agentCount > 0 && <span className="tb-tool__count">{agentCount}</span>}
-        </button>
-        <button
-          className={`tb-tool${openPanel === 'prompts' ? ' tb-tool--on' : ''}`}
-          title="Saved prompts you can send to any agent"
-          onClick={() => togglePanel('prompts')}
-        >
-          <IconChat />
-          <span className="tb-tool__label">Prompts</span>
-        </button>
-        <button
-          className={`tb-tool${openPanel === 'checkpoints' ? ' tb-tool--on' : ''}`}
-          title="Git snapshots of your project you can roll back to"
-          onClick={() => togglePanel('checkpoints')}
-        >
-          <IconHistory />
-          <span className="tb-tool__label">Checkpoints</span>
-        </button>
-        <button
-          className={`tb-tool${followAgent ? ' tb-tool--on' : ''}`}
-          title="Move the view to whichever agent starts working"
-          onClick={() => setFollowAgent(!followAgent)}
-        >
-          <IconFollow />
-          <span className="tb-tool__label">Follow agents</span>
-        </button>
-        <button
-          className={`tb-tool${openPanel === 'memory' ? ' tb-tool--on' : ''}`}
-          title="Claude's memory for this project, as a linked graph"
-          onClick={() => togglePanel('memory')}
-        >
-          <IconClaude />
-          <span className="tb-tool__label">Memory</span>
-        </button>
-      </div>
-
-      <div className="topbar__spacer" />
-
-      <div className="topbar__actions">
-        <UsagePill />
-        <button className="tb-btn" onClick={() => setPaletteOpen(true)} title="Commands (⌘K)">
-          <IconSearch /> <span className="tb-btn__label">Commands</span> <span className="kbd">⌘K</span>
-        </button>
-        <button className="tb-btn" onClick={() => void openFile()} title="Open a canvas (⌘O)">
-          <IconFolder /> <span className="tb-btn__label">Open</span> <span className="kbd">⌘O</span>
-        </button>
-        <button className="tb-btn" onClick={() => void saveActive()} title="Save this canvas (⌘S)">
-          <IconSave /> <span className="tb-btn__label">Save</span> <span className="kbd">⌘S</span>
-        </button>
-        <button className="tb-btn tb-btn--accent" onClick={() => void newTab()} title="New canvas (⌘N)">
-          <IconPlus /> <span className="tb-btn__label">New</span>
-        </button>
-      </div>
-    </header>
+      <button
+        className={on(openPanel === 'prompts')}
+        title="Prompts: saved prompts you can send to any agent"
+        onClick={() => togglePanel('prompts')}
+      >
+        <IconChat />
+      </button>
+      <button
+        className={on(openPanel === 'checkpoints')}
+        title="Checkpoints: git snapshots you can roll back to"
+        onClick={() => togglePanel('checkpoints')}
+      >
+        <IconHistory />
+      </button>
+      <button
+        className={on(followAgent)}
+        title="Follow agents: move the view to whichever agent starts working"
+        onClick={() => setFollowAgent(!followAgent)}
+      >
+        <IconFollow />
+      </button>
+      <button
+        className={on(openPanel === 'memory')}
+        title="Memory: Claude's memory for this project, as a linked graph"
+        onClick={() => togglePanel('memory')}
+      >
+        <IconClaude />
+      </button>
+    </div>
   )
 }

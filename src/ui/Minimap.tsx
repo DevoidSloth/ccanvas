@@ -1,28 +1,26 @@
-import { useState } from 'react'
+import { viewport } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { boundsOfMany, elementBounds, screenToWorld } from '../lib/geometry'
 import { WIDGET_ACCENT } from '../lib/types'
 
 // Overview map of the whole canvas with the current viewport outlined.
-// Click anywhere to recenter the camera there.
+// Click anywhere to recenter the camera there. Shown/hidden from the HUD.
 
-const CHROME_H = 82
-const MAP_W = 184
-const MAP_H = 132
+const MAP_W = 168
+const MAP_H = 112
 const PAD = 8
 
 export function Minimap() {
   const ws = useStore(selectActive)
   const setCamera = useStore((s) => s.setCamera)
-  const [collapsed, setCollapsed] = useState(false)
 
   const world = boundsOfMany(ws.elements)
   if (!world || ws.elements.length === 0) return null
 
   // viewport rectangle in world coords
   const cam = ws.camera
-  const vw = window.innerWidth
-  const vh = window.innerHeight - CHROME_H
+  const vw = viewport().vw
+  const vh = viewport().vh
   const tl = screenToWorld({ x: 0, y: 0 }, cam)
   const br = screenToWorld({ x: vw, y: vh }, cam)
   const view = { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y }
@@ -49,23 +47,9 @@ export function Minimap() {
     setCamera({ zoom: cam.zoom, x: vw / 2 - wx * cam.zoom, y: vh / 2 - wy * cam.zoom })
   }
 
-  if (collapsed) {
-    return (
-      <button className="minimap__toggle" title="Show minimap" onClick={() => setCollapsed(false)}>
-        map
-      </button>
-    )
-  }
-
   const vp = toMap(view.x, view.y)
   return (
     <div className="minimap">
-      <div className="minimap__head">
-        <span>map</span>
-        <button className="minimap__btn" title="Hide" onClick={() => setCollapsed(true)}>
-          ×
-        </button>
-      </div>
       <div
         className="minimap__canvas"
         style={{ width: MAP_W, height: MAP_H }}
@@ -76,7 +60,7 @@ export function Minimap() {
           const p = toMap(b.x, b.y)
           const color =
             el.type === 'widget'
-              ? WIDGET_ACCENT[el.kind]
+              ? (el.color ?? WIDGET_ACCENT[el.kind])
               : el.type === 'frame'
                 ? '#8f8c83'
                 : el.type === 'image'

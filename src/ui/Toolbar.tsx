@@ -1,4 +1,5 @@
 import { useStore, selectActive } from '../store/workspace'
+import { viewCenter } from '../lib/view'
 import { screenToWorld } from '../lib/geometry'
 import type { WidgetKind } from '../lib/types'
 import {
@@ -12,7 +13,7 @@ import {
 
 type IconCmp = (p: { className?: string; size?: number }) => JSX.Element
 
-// The two things ccanvas is for, as labelled buttons.
+// The two things ccanvas is for: Claude (labelled) and a plain terminal.
 const LAUNCHERS: { kind: WidgetKind; Icon: IconCmp; label: string; keys: string }[] = [
   { kind: 'agent', Icon: IconAgent, label: 'Claude', keys: '⌘⇧T' },
   { kind: 'terminal', Icon: IconTerminal, label: 'Terminal', keys: '⌘T' },
@@ -26,9 +27,7 @@ const PANELS: { kind: WidgetKind; Icon: IconCmp; label: string }[] = [
   { kind: 'note', Icon: IconNote, label: 'Note' },
 ]
 
-// 82px = topbar + tabs; matches CHROME_H in App.tsx
-const CHROME_H = 82
-const center = () => ({ x: window.innerWidth / 2, y: (window.innerHeight - CHROME_H) / 2 })
+const center = () => ({ x: viewCenter().x, y: viewCenter().y })
 
 export function Toolbar() {
   const spawnWidget = useStore((s) => s.spawnWidget)
@@ -60,8 +59,7 @@ export function Toolbar() {
           title={`New ${kind === 'agent' ? 'Claude agent' : 'terminal'} (${keys})`}
         >
           <Icon />
-          <span className="launcher__label">{label}</span>
-          <span className="launcher__keys">{keys}</span>
+          {kind === 'agent' && <span className="launcher__label">{label}</span>}
         </button>
       ))}
 
@@ -73,7 +71,6 @@ export function Toolbar() {
           <span className="tool__tip">{label}</span>
         </button>
       ))}
-
     </div>
   )
 }

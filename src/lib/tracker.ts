@@ -37,9 +37,13 @@ const SAT_W = 360
 const SAT_H = 280
 const POLL_MS = 1000
 
-// topbar + tabs; matches CHROME_H elsewhere
-const CHROME_H = 82
-const viewport = () => ({ vw: window.innerWidth, vh: window.innerHeight - CHROME_H })
+// the canvas fills .app__main (the window minus the slim top bar)
+const viewport = () => {
+  const main = document.querySelector('.app__main')
+  return main
+    ? { vw: main.clientWidth, vh: main.clientHeight }
+    : { vw: window.innerWidth, vh: window.innerHeight - 38 }
+}
 
 export function trackingAgentId(): string | null {
   return session?.agentId ?? null

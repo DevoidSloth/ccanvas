@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { WidgetElement, WidgetKind } from '../lib/types'
-import { WIDGET_ACCENT } from '../lib/types'
+import { WIDGET_ACCENT, AGENT_COLORS, claudeColorName } from '../lib/types'
 import { useStore, selectActive } from '../store/workspace'
 import { elementBounds, edgeLines, snapValue } from '../lib/geometry'
 import {
@@ -15,6 +15,7 @@ import {
   IconDoc,
   IconLog,
   IconLock,
+  IconTag,
   IconSettings,
   IconPr,
   IconRun,
@@ -30,6 +31,7 @@ import {
 } from '../ui/icons'
 import { useAgents, sendTo, sendPrompt, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
 import { useAgentContext } from '../lib/context'
+import { FAR_ZOOM, focusWidget, passesLabelFilter } from '../lib/view'
 import { NoteBody } from './NoteBody'
 import { WebBody } from './WebBody'
 import { TerminalBody } from './TerminalBody'
@@ -99,11 +101,19 @@ export function WidgetFrame({
   const beginHistory = useStore((s) => s.beginHistory)
   const openAgentWizard = useStore((s) => s.openAgentWizard)
 
+  const setLabelingWidget = useStore((s) => s.setLabelingWidget)
+  const labeling = useStore((s) => s.labelingWidgetId === el.id)
+  // zoomed far out, terminals swap their unreadable text for a summary card
+  const far = useStore((s) => selectActive(s).camera.zoom < FAR_ZOOM)
+  const dimmed = useStore((s) => !passesLabelFilter(el, s.labelFilter))
+
   const active = activeWidgetId === el.id
   const Icon = KIND_ICON[el.kind]
   const accent = el.color ?? WIDGET_ACCENT[el.kind]
   // terminals/agents are live — interact on a single click, drag by the title bar
   const isTerminal = el.kind === 'terminal' || el.kind === 'agent'
+  // a user-chosen colour tints the whole faceplate so it reads when zoomed out
+  const tagged = isTerminal && !!el.color
   // app-like panels also interact on a single click (no double-click shield)
   const isLive =
     isTerminal ||
@@ -159,6 +169,8 @@ export function WidgetFrame({
       setSelection([el.id])
     }
     bringToFront([el.id])
+    // grabbing another widget's title bar counts as clicking out of a terminal
+    if (useStore.getState().activeWidgetId !== el.id) setActiveWidget(null)
     onStartMove(e, el.id)
   }
 
@@ -174,6 +186,53 @@ export function WidgetFrame({
   }
   const onLiveBodyDown = (e: React.PointerEvent) => {
     if (tool === 'select') e.stopPropagation()
+  }
+
+  // Terminals you haven't clicked into don't take the pointer: dragging across
+  // one moves the canvas, and a click (no drag) enters it. Once entered it gets
+  // every event — text selection, scrollback, typing — until you click
+  // somewhere else (the canvas, another widget, another terminal).
+  const onTerminalBodyCapture = (e: React.PointerEvent) => {
+    if (tool !== 'select') return
+    if (active || e.button !== 0) return onLiveBodyCapture()
+    // keep xterm from seeing this press (preventDefault also suppresses the
+    // compatibility mousedown/move/up it selects with)
+    e.preventDefault()
+    e.stopPropagation()
+    const start = { x: e.clientX, y: e.clientY }
+    const cam0 = selectActive(useStore.getState()).camera
+    let panning = false
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return
+      const dx = ev.clientX - start.x
+      const dy = ev.clientY - start.y
+      if (!panning && Math.hypot(dx, dy) < 4) return
+      panning = true
+      document.body.classList.add('is-panning')
+      useStore.getState().setCamera({ ...cam0, x: cam0.x + dx, y: cam0.y + dy })
+    }
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      document.body.classList.remove('is-panning')
+      if (panning || ev.type !== 'pointerup') return
+      // from far out, a click flies in to the terminal instead of typing blind
+      if (selectActive(useStore.getState()).camera.zoom < FAR_ZOOM) focusWidget(el.id)
+      else onLiveBodyCapture()
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+  // belt-and-braces for engines that still fire mousedown after a prevented
+  // pointerdown: an inactive terminal must not start a text selection
+  const onTerminalMouseCapture = (e: React.MouseEvent) => {
+    if (tool === 'select' && !active && e.button === 0) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
   }
 
   // drop onto an agent/terminal to feed it context: a file (dragged from a
@@ -278,6 +337,8 @@ export function WidgetFrame({
     <div
       className={`widget${selected ? ' widget--selected' : ''}${
         active ? ' widget--active' : ''
+      }${tagged ? ' widget--tagged' : ''}${isTerminal ? ' widget--term' : ''}${
+        dimmed ? ' widget--dimmed' : ''
       }`}
       data-widget-id={el.id}
       style={
@@ -345,6 +406,17 @@ export function WidgetFrame({
               <IconSettings />
             </button>
           )}
+          {isTerminal && (
+            <button
+              className={`widget__btn${labeling ? ' widget__btn--on' : ''}`}
+              title="Label"
+              data-label-toggle
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => setLabelingWidget(labeling ? null : el.id)}
+            >
+              <IconTag />
+            </button>
+          )}
           <button
             className={`widget__btn${el.locked ? ' widget__btn--on' : ''}`}
             title={el.locked ? 'Unlock' : 'Lock position'}
@@ -371,6 +443,7 @@ export function WidgetFrame({
           </button>
         </div>
       </div>
+      {labeling && <LabelPopover el={el} onClose={() => setLabelingWidget(null)} />}
 
       <div
         className="widget__body"
@@ -379,7 +452,10 @@ export function WidgetFrame({
             ? { pointerEvents: tool === 'select' ? 'auto' : 'none' }
             : undefined
         }
-        onPointerDownCapture={isLive ? onLiveBodyCapture : undefined}
+        onPointerDownCapture={
+          isTerminal ? onTerminalBodyCapture : isLive ? onLiveBodyCapture : undefined
+        }
+        onMouseDownCapture={isTerminal ? onTerminalMouseCapture : undefined}
         onPointerDown={isLive ? onLiveBodyDown : undefined}
         onDragOver={isTerminal ? onBodyDragOver : undefined}
         onDrop={isTerminal ? onBodyDrop : undefined}
@@ -391,6 +467,7 @@ export function WidgetFrame({
           {el.kind === 'mediainfo' && <MediaInfoBody el={el} />}
           {el.kind === 'claude' && <ClaudeBody el={el} />}
           {isTerminal && <TerminalBody el={el} active={active} visible={visible} />}
+          {isTerminal && far && visible && <TermCard el={el} />}
           {el.kind === 'files' && <FilesBody el={el} />}
           {el.kind === 'diff' && <DiffBody el={el} />}
           {el.kind === 'editor' && <EditorBody el={el} active={active} />}
@@ -437,6 +514,150 @@ export function WidgetFrame({
 
 // Activity dot for terminal/agent widgets: reflects whether the session is
 // idle, streaming output, or appears to be waiting on a prompt.
+// Label popover: name + colour tag for a terminal/agent. Colour applies live;
+// the name commits on Enter / click-away and reverts on Escape. A live claude
+// agent is told its new name and colour, same as the agent wizard does.
+function LabelPopover({ el, onClose }: { el: WidgetElement; onClose: () => void }) {
+  const mutateElement = useStore((s) => s.mutateElement)
+  const beginHistory = useStore((s) => s.beginHistory)
+  const [name, setName] = useState(el.title)
+  const startColor = useRef(el.color)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const isAgent = el.kind === 'agent'
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
+
+  // one undo step for the whole edit, taken only once something changes
+  const dirty = useRef(false)
+  const edit = (fn: (w: WidgetElement) => void) => {
+    if (!dirty.current) beginHistory()
+    dirty.current = true
+    mutateElement(el.id, (w) => fn(w as WidgetElement))
+  }
+  const setColor = (hex: string | undefined) =>
+    edit((w) => {
+      w.color = hex
+    })
+
+  const commit = () => {
+    const t = name.trim() || el.title
+    if (t !== el.title)
+      edit((w) => {
+        w.title = t
+      })
+    if (isAgent && isSessionLive(el.id)) {
+      if (t !== el.title) sendTo(el.id, `/rename ${t}\r`)
+      if (el.color !== startColor.current) sendTo(el.id, `/color ${claudeColorName(el.color)}\r`)
+    }
+    onClose()
+  }
+  const cancel = () => {
+    if (el.color !== startColor.current) setColor(startColor.current)
+    onClose()
+  }
+
+  // click-away commits (the tag button toggles the popover itself)
+  const commitRef = useRef(commit)
+  commitRef.current = commit
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element
+      if (boxRef.current?.contains(t) || t.closest?.('[data-label-toggle]')) return
+      commitRef.current()
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    return () => window.removeEventListener('pointerdown', onDown, true)
+  }, [])
+
+  return (
+    <div
+      ref={boxRef}
+      className="label-pop"
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') commit()
+        if (e.key === 'Escape') cancel()
+      }}
+    >
+      <input
+        ref={inputRef}
+        className="label-pop__input"
+        value={name}
+        placeholder="Label"
+        onChange={(e) => setName(e.target.value)}
+      />
+      <div className="label-pop__swatches">
+        {!isAgent && (
+          <button
+            className={`label-pop__swatch label-pop__swatch--none${
+              !el.color ? ' label-pop__swatch--on' : ''
+            }`}
+            title="No colour"
+            onClick={() => setColor(undefined)}
+          />
+        )}
+        {AGENT_COLORS.map((c) => (
+          <button
+            key={c.name}
+            className={`label-pop__swatch${
+              el.color?.toLowerCase() === c.hex.toLowerCase() ? ' label-pop__swatch--on' : ''
+            }`}
+            style={{ background: c.hex }}
+            title={c.name}
+            onClick={() => setColor(c.hex)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Zoomed-out summary of a terminal/agent: name, colour, status, context use and
+// the latest line of output, sized in screen pixels (via the world's --z) so it
+// stays readable however far out you are. Sits over the live terminal, which
+// keeps running underneath.
+const STATUS_LABEL: Record<string, string> = {
+  working: 'working',
+  waiting: 'needs input',
+  idle: 'idle',
+  connecting: 'connecting',
+  off: 'offline',
+}
+function TermCard({ el }: { el: WidgetElement }) {
+  const status = useAgents((s) => s.status[el.id]) ?? 'off'
+  const lastLine = useAgents((s) => s.lastLine[el.id])
+  const folder = el.cwd ? el.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null
+  return (
+    <div className={`term-card term-card--${status}`}>
+      <div className="term-card__name">{el.title}</div>
+      <div className="term-card__meta">
+        <span className="term-card__status">
+          <span className="term-card__dot" />
+          {STATUS_LABEL[status] ?? status}
+        </span>
+        {el.kind === 'agent' && <CardContext el={el} />}
+        {folder && <span className="term-card__folder">{folder}</span>}
+      </div>
+      {lastLine && <div className="term-card__line">{lastLine}</div>}
+    </div>
+  )
+}
+function CardContext({ el }: { el: WidgetElement }) {
+  const ctx = useAgentContext(el.cwd, el.sessionId, el.model)
+  if (!ctx) return null
+  const pct = Math.round(ctx.pct)
+  return (
+    <span className={`term-card__ctx${pct >= 85 ? ' term-card__ctx--hot' : ''}`}>
+      {pct}% context
+    </span>
+  )
+}
+
 function AgentDot({ id }: { id: string }) {
   const status = useAgents((s) => s.status[id])
   if (!status || status === 'off') return null

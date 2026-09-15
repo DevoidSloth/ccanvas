@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { viewport, viewCenter, cycleTerminal } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { screenToWorld } from '../lib/geometry'
 import { elementBounds } from '../lib/geometry'
@@ -6,6 +7,7 @@ import { downloadPng, downloadSvg } from '../lib/export'
 import { runCommand, joinPath } from '../lib/backend'
 import { sendPrompt, isLive } from '../lib/agents'
 import type { WidgetKind } from '../lib/types'
+import { AGENT_COLORS } from '../lib/types'
 
 /** The focused/selected agent or terminal a prompt insert should target. */
 function injectTargetId(): string | null {
@@ -20,10 +22,9 @@ function injectTargetId(): string | null {
   return s.selection.find((id) => ok(id)) ?? null
 }
 
-const CHROME_H = 82
 const worldCenter = () =>
   screenToWorld(
-    { x: window.innerWidth / 2, y: (window.innerHeight - CHROME_H) / 2 },
+    { x: viewCenter().x, y: viewCenter().y },
     selectActive(useStore.getState()).camera,
   )
 
@@ -164,6 +165,48 @@ export function CommandPalette() {
     for (const [label, run] of arrange)
       out.push({ id: `arr-${label}`, label, group: 'Arrange', run })
 
+    // terminals: arrange, switch, filter
+    const fitAll = () => s.homeView(viewport().vw, viewport().vh)
+    out.push(
+      {
+        id: 'term-arrange-label',
+        label: 'Arrange terminals by label colour',
+        group: 'Terminals',
+        run: () => {
+          s.arrangeTerminals('label')
+          fitAll()
+        },
+      },
+      {
+        id: 'term-arrange-folder',
+        label: 'Arrange terminals by folder',
+        group: 'Terminals',
+        run: () => {
+          s.arrangeTerminals('folder')
+          fitAll()
+        },
+      },
+      { id: 'term-next', label: 'Next terminal', hint: '⌘⇧]', group: 'Terminals', run: () => cycleTerminal(1) },
+      { id: 'term-prev', label: 'Previous terminal', hint: '⌘⇧[', group: 'Terminals', run: () => cycleTerminal(-1) },
+    )
+    if (s.labelFilter)
+      out.push({
+        id: 'term-filter-clear',
+        label: 'Show all terminals (clear label filter)',
+        group: 'Terminals',
+        run: () => s.setLabelFilter(null),
+      })
+    for (const c of AGENT_COLORS) {
+      const hex = c.hex.toLowerCase()
+      if (!ws.elements.some((e) => e.type === 'widget' && e.color?.toLowerCase() === hex)) continue
+      out.push({
+        id: `term-filter-${c.name}`,
+        label: `Show only ${c.name} terminals`,
+        group: 'Terminals',
+        run: () => s.setLabelFilter([hex]),
+      })
+    }
+
     // canvas / file
     out.push(
       { id: 'save', label: 'Save canvas', hint: '⌘S', group: 'Canvas', run: () => void s.saveActive() },
@@ -178,6 +221,12 @@ export function CommandPalette() {
         run: () => s.setOpenPanel('memory'),
       },
       { id: 'folder', label: 'Set canvas folder…', group: 'Canvas', run: () => void s.setActiveDir() },
+      {
+        id: 'pin-tab',
+        label: ws.pinned ? 'Unpin this tab' : 'Pin this tab',
+        group: 'Canvas',
+        run: () => s.togglePinTab(ws.id),
+      },
       { id: 'png', label: 'Export as PNG', group: 'Canvas', run: () => void downloadPng(ws) },
       { id: 'svg', label: 'Export as SVG', group: 'Canvas', run: () => downloadSvg(ws) },
       {
@@ -185,7 +234,7 @@ export function CommandPalette() {
         label: 'Focus selection',
         hint: '\\',
         group: 'View',
-        run: () => s.zoomToSelection(window.innerWidth, window.innerHeight - CHROME_H),
+        run: () => s.zoomToSelection(viewport().vw, viewport().vh),
       },
       {
         id: 'panel-roster',
@@ -286,8 +335,8 @@ export function CommandPalette() {
             const cy = b.y + b.h / 2
             s.setCamera({
               zoom: cam.zoom,
-              x: window.innerWidth / 2 - cx * cam.zoom,
-              y: (window.innerHeight - CHROME_H) / 2 - cy * cam.zoom,
+              x: viewCenter().x - cx * cam.zoom,
+              y: viewCenter().y - cy * cam.zoom,
             })
             s.setSelection([el.id])
           },

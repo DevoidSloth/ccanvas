@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
+import { viewCenter } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { screenToWorld } from '../lib/geometry'
 import { makeGreeting, loadFirstName, type Greeting } from '../lib/greeting'
 import { IconFolder, IconAgent } from './icons'
 
-// 82px = topbar + tabs; matches CHROME_H in App.tsx
-const CHROME_H = 82
 
 export function Welcome() {
   const ws = useStore(selectActive)
@@ -25,7 +24,7 @@ export function Welcome() {
   const spawnFirst = () => {
     const cam = selectActive(useStore.getState()).camera
     const world = screenToWorld(
-      { x: window.innerWidth / 2, y: (window.innerHeight - CHROME_H) / 2 },
+      { x: viewCenter().x, y: viewCenter().y },
       cam,
     )
     openAgentWizard({ x: world.x, y: world.y })
