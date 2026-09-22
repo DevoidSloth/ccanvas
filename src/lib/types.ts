@@ -22,6 +22,7 @@ export type WidgetKind =
   | 'files'
   | 'diff'
   | 'editor'
+  | 'vscode'
   | 'doc'
   | 'log'
   | 'pr'
@@ -270,6 +271,7 @@ export const WIDGET_ACCENT: Record<WidgetKind, string> = {
   files: '#5ab977',
   diff: '#d97757',
   editor: '#6cc3d1',
+  vscode: '#4a9eea', // VS Code blue
   doc: '#deb566',
   log: '#c2c0b6',
   pr: '#6d9be8',

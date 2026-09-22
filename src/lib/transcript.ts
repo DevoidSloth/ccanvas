@@ -263,3 +263,27 @@ export function parseTranscript(jsonl: string): TranscriptTurn[] {
   }
   return out
 }
+
+function lastStringField(jsonl: string, type: string, field: string): string | null {
+  const at = jsonl.lastIndexOf(`"type":"${type}"`)
+  if (at < 0) return null
+  const start = jsonl.lastIndexOf('\n', at) + 1
+  const end = jsonl.indexOf('\n', at)
+  try {
+    const ev = JSON.parse(jsonl.slice(start, end < 0 ? undefined : end)) as Record<string, unknown>
+    const v = ev[field]
+    return typeof v === 'string' && v.trim() ? v.trim() : null
+  } catch {
+    return null
+  }
+}
+
+/** The session's names. `custom` is the newest `/rename` (a `custom-title`
+ *  record); `ai` is the name Claude generates itself after the first prompt
+ *  (an `ai-title` record). */
+export function extractSessionTitles(jsonl: string): { custom: string | null; ai: string | null } {
+  return {
+    custom: lastStringField(jsonl, 'custom-title', 'customTitle'),
+    ai: lastStringField(jsonl, 'ai-title', 'aiTitle'),
+  }
+}

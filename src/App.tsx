@@ -24,6 +24,9 @@ import { MemoryPanel } from './ui/MemoryPanel'
 import { CanvasSearch } from './ui/CanvasSearch'
 import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
+import { useTerminalFileDrop } from './lib/fileDrop'
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
 
 // Anchor zooms at the centre of the canvas area (below the chrome).
 const canvasCenter = viewCenter
@@ -60,6 +63,7 @@ function closeCurrentWidget() {
 }
 
 export default function App() {
+  useTerminalFileDrop()
   const tool = useStore((s) => s.tool)
   const openPanel = useStore((s) => s.openPanel)
 
@@ -70,7 +74,7 @@ export default function App() {
   //   ⌘Esc     click out of the current terminal
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey && !e.ctrlKey) return
+      if (!(e.metaKey || (e.ctrlKey && !IS_MAC))) return
       if (e.altKey) return
       const stop = () => {
         e.preventDefault()
@@ -106,7 +110,9 @@ export default function App() {
         t.tagName === 'INPUT' ||
         t.tagName === 'TEXTAREA' ||
         t.closest('.xterm') != null
-      const mod = e.metaKey || e.ctrlKey
+      // On macOS Ctrl belongs to the terminal (C-x, C-c, C-a…), so only ⌘
+      // triggers canvas shortcuts there; elsewhere Ctrl is the modifier.
+      const mod = e.metaKey || (e.ctrlKey && !IS_MAC)
       const key = e.key.toLowerCase()
       const store = useStore.getState()
 
@@ -131,6 +137,15 @@ export default function App() {
         e.preventDefault()
         const w = worldCenter()
         const id = store.spawnWidget(e.shiftKey ? 'agent' : 'terminal', w.x, w.y)
+        store.setSelection([id])
+        store.setActiveWidget(id)
+        return
+      }
+      // ⌘⇧V opens a VS Code widget for this canvas's folder
+      if (mod && e.shiftKey && key === 'v' && !e.altKey) {
+        e.preventDefault()
+        const w = worldCenter()
+        const id = store.spawnWidget('vscode', w.x, w.y)
         store.setSelection([id])
         store.setActiveWidget(id)
         return

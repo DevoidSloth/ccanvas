@@ -1,4 +1,5 @@
 // ccanvas desktop backend (pty + native dialogs/fs)
+mod editor;
 mod files;
 mod media;
 mod plan_usage;
@@ -123,6 +124,8 @@ pub fn run() {
             files::write_text,
             files::list_dir,
             files::run_command,
+            editor::code_serve,
+            editor::code_stop,
             files::open_external,
             files::reveal_path,
             files::home_dir,
@@ -141,6 +144,12 @@ pub fn run() {
             watch::watch_start,
             watch::watch_stop,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // don't leave `code serve-web` servers running after we quit
+            if let tauri::RunEvent::Exit = event {
+                editor::stop_all();
+            }
+        });
 }

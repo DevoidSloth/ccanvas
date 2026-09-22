@@ -31,6 +31,7 @@ import {
 } from '../ui/icons'
 import { useAgents, sendTo, sendPrompt, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
 import { useAgentContext } from '../lib/context'
+import { useSyncSessionTitle } from '../lib/sessionTitle'
 import { FAR_ZOOM, focusWidget, passesLabelFilter } from '../lib/view'
 import { NoteBody } from './NoteBody'
 import { WebBody } from './WebBody'
@@ -38,6 +39,7 @@ import { TerminalBody } from './TerminalBody'
 import { FilesBody } from './FilesBody'
 import { DiffBody } from './DiffBody'
 import { EditorBody } from './EditorBody'
+import { VsCodeBody } from './VsCodeBody'
 import { DocBody } from './DocBody'
 import { LogBody } from './LogBody'
 import { PrBody } from './PrBody'
@@ -61,6 +63,7 @@ const KIND_ICON: Record<WidgetKind, (p: { className?: string; size?: number }) =
   files: IconFiles,
   diff: IconDiff,
   editor: IconEditor,
+  vscode: IconEditor,
   doc: IconDoc,
   log: IconLog,
   pr: IconPr,
@@ -106,6 +109,7 @@ export function WidgetFrame({
   // zoomed far out, terminals swap their unreadable text for a summary card
   const far = useStore((s) => selectActive(s).camera.zoom < FAR_ZOOM)
   const dimmed = useStore((s) => !passesLabelFilter(el, s.labelFilter))
+  useSyncSessionTitle(el)
 
   const active = activeWidgetId === el.id
   const Icon = KIND_ICON[el.kind]
@@ -120,6 +124,7 @@ export function WidgetFrame({
     el.kind === 'files' ||
     el.kind === 'diff' ||
     el.kind === 'editor' ||
+    el.kind === 'vscode' ||
     el.kind === 'doc' ||
     el.kind === 'log' ||
     el.kind === 'pr' ||
@@ -457,6 +462,7 @@ export function WidgetFrame({
         }
         onMouseDownCapture={isTerminal ? onTerminalMouseCapture : undefined}
         onPointerDown={isLive ? onLiveBodyDown : undefined}
+        data-drop-term={isTerminal ? '' : undefined}
         onDragOver={isTerminal ? onBodyDragOver : undefined}
         onDrop={isTerminal ? onBodyDrop : undefined}
       >
@@ -471,6 +477,7 @@ export function WidgetFrame({
           {el.kind === 'files' && <FilesBody el={el} />}
           {el.kind === 'diff' && <DiffBody el={el} />}
           {el.kind === 'editor' && <EditorBody el={el} active={active} />}
+          {el.kind === 'vscode' && <VsCodeBody el={el} active={active} />}
           {el.kind === 'doc' && <DocBody el={el} />}
           {el.kind === 'log' && <LogBody el={el} />}
           {el.kind === 'pr' && <PrBody el={el} />}

@@ -551,3 +551,27 @@ export function resolvePath(base: string | undefined, p: string): string {
   if (!base || isAbsolutePath(p)) return p
   return joinPath(base, p)
 }
+
+// ---------- VS Code widget ----------
+
+export type CodeServer = { url: string; port: number; started: boolean }
+
+/** Start (or reuse) `code serve-web` for a folder and get its localhost URL.
+ *  Rejects with a human-readable message when VS Code can't be started. */
+export async function codeServe(dir: string): Promise<CodeServer> {
+  if (isTauri()) return invoke<CodeServer>('code_serve', { dir })
+  const r = await fetch(`${BASE}/code-serve?dir=${encodeURIComponent(dir)}`)
+  const body = (await r.json()) as CodeServer & { error?: string }
+  if (!r.ok) throw new Error(body.error || 'couldn\'t start VS Code')
+  return body
+}
+
+/** Stop the VS Code server bound to a folder. */
+export async function codeStop(dir: string): Promise<void> {
+  try {
+    if (isTauri()) await invoke('code_stop', { dir })
+    else await fetch(`${BASE}/code-stop?dir=${encodeURIComponent(dir)}`)
+  } catch {
+    /* already gone */
+  }
+}

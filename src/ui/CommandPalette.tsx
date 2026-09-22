@@ -6,7 +6,7 @@ import { elementBounds } from '../lib/geometry'
 import { downloadPng, downloadSvg } from '../lib/export'
 import { runCommand, joinPath } from '../lib/backend'
 import { sendPrompt, isLive } from '../lib/agents'
-import type { WidgetKind } from '../lib/types'
+import type { CanvasElement, WidgetKind } from '../lib/types'
 import { AGENT_COLORS } from '../lib/types'
 
 /** The focused/selected agent or terminal a prompt insert should target. */
@@ -28,7 +28,47 @@ const worldCenter = () =>
     selectActive(useStore.getState()).camera,
   )
 
-type Item = { id: string; label: string; hint?: string; group: string; run: () => void }
+type Item = {
+  id: string
+  label: string
+  hint?: string
+  group: string
+  run: () => void
+  /** switch the palette into this scope instead of running + closing */
+  mode?: Scope
+}
+
+// ⇧← / ⇧→ cycle through these. `notes` is also entered by typing `rnotes `.
+type Scope = 'all' | 'commands' | 'go' | 'notes'
+const SCOPES: { id: Scope; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'commands', label: 'Commands' },
+  { id: 'go', label: 'Go to' },
+  { id: 'notes', label: 'Notes' },
+]
+const NOTES_TRIGGER = /^rnotes\s/i
+
+const scopeOf = (it: Item): Scope =>
+  it.group === 'Navigate' || it.group === 'Tabs' ? 'go' : it.group === 'Notes' ? 'notes' : 'commands'
+
+/** A note's name is its first non-empty line, minus markdown decoration. */
+function noteName(el: CanvasElement): string {
+  const raw = el.type === 'widget' ? (el.note ?? '') : ''
+  const line = raw
+    .split('\n')
+    .map((l) => l.replace(/^[\s#>*+-]*(\[[ xX]?\]\s*)?/, '').trim())
+    .find(Boolean)
+  return line ? line.slice(0, 80) : 'Empty note'
+}
+
+const widgetName = (el: CanvasElement) =>
+  el.type === 'widget' && el.kind === 'note' ? noteName(el) : el.type === 'widget' ? el.title : ''
+
+function createNote(text: string) {
+  const s = useStore.getState()
+  const w = worldCenter()
+  s.spawnWidget('note', w.x, w.y, text ? { note: text } : undefined)
+}
 
 const SPAWNABLE: { kind: WidgetKind; label: string }[] = [
   { kind: 'agent', label: 'Claude agent' },
@@ -36,6 +76,7 @@ const SPAWNABLE: { kind: WidgetKind; label: string }[] = [
   { kind: 'files', label: 'File tree' },
   { kind: 'diff', label: 'Git panel' },
   { kind: 'editor', label: 'Editor' },
+  { kind: 'vscode', label: 'VS Code' },
   { kind: 'note', label: 'Note' },
 ]
 
@@ -46,12 +87,14 @@ export function CommandPalette() {
   const setOpen = useStore((s) => s.setPaletteOpen)
   const [q, setQ] = useState('')
   const [hi, setHi] = useState(0)
+  const [scope, setScope] = useState<Scope>('all')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (open) {
       setQ('')
       setHi(0)
+      setScope('all')
       requestAnimationFrame(() => inputRef.current?.focus())
     }
   }, [open])
@@ -66,7 +109,7 @@ export function CommandPalette() {
       out.push({
         id: `spawn-${kind}`,
         label: `New: ${label}`,
-        hint: 'widget',
+        hint: kind === 'vscode' ? '⌘⇧V' : 'widget',
         group: 'Create',
         run: () => {
           const w = worldCenter()
@@ -320,46 +363,89 @@ export function CommandPalette() {
           run: () => s.switchTab(tab.id),
         })
 
-    // jump to a widget by title
+    // jump to a widget by name
+    const goTo = (el: CanvasElement) => {
+      const b = elementBounds(el)
+      const cam = ws.camera
+      const cx = b.x + b.w / 2
+      const cy = b.y + b.h / 2
+      s.setCamera({
+        zoom: cam.zoom,
+        x: viewCenter().x - cx * cam.zoom,
+        y: viewCenter().y - cy * cam.zoom,
+      })
+      s.setSelection([el.id])
+    }
     for (const el of ws.elements)
       if (el.type === 'widget')
         out.push({
           id: `jump-${el.id}`,
-          label: `Go to: ${el.title}`,
+          label: `Go to: ${widgetName(el)}`,
           hint: el.kind,
           group: 'Navigate',
+          run: () => goTo(el),
+        })
+
+    // notes (rnotes): open an existing note for editing
+    for (const el of ws.elements)
+      if (el.type === 'widget' && el.kind === 'note')
+        out.push({
+          id: `note-${el.id}`,
+          label: noteName(el),
+          hint: 'note',
+          group: 'Notes',
           run: () => {
-            const b = elementBounds(el)
-            const cam = ws.camera
-            const cx = b.x + b.w / 2
-            const cy = b.y + b.h / 2
-            s.setCamera({
-              zoom: cam.zoom,
-              x: viewCenter().x - cx * cam.zoom,
-              y: viewCenter().y - cy * cam.zoom,
-            })
-            s.setSelection([el.id])
+            goTo(el)
+            s.setActiveWidget(el.id)
           },
         })
+    out.push({
+      id: 'mode-notes',
+      label: 'Notes',
+      hint: 'rnotes',
+      group: 'Modes',
+      run: () => {},
+      mode: 'notes',
+    })
 
     return out
   }, [open])
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase()
-    if (!t) return items
-    const terms = t.split(/\s+/)
-    return items.filter((it) => {
+    const terms = t.split(/\s+/).filter(Boolean)
+    const list = items.filter((it) => {
+      const sc = scopeOf(it)
+      // notes only surface inside the notes scope (`rnotes`)
+      if (scope === 'all' ? sc === 'notes' : sc !== scope) return false
       const hay = (it.label + ' ' + it.group + ' ' + (it.hint ?? '')).toLowerCase()
       return terms.every((term) => hay.includes(term))
     })
-  }, [items, q])
+    if (scope === 'notes') {
+      const text = q.trim()
+      list.unshift({
+        id: 'note-create',
+        label: text ? `Create note: ${text}` : 'New note',
+        hint: '↵',
+        group: 'Notes',
+        run: () => createNote(text),
+      })
+    }
+    return list
+  }, [items, q, scope])
 
   if (!open) return null
 
   const close = () => setOpen(false)
   const choose = (it: Item | undefined) => {
     if (!it) return
+    if (it.mode) {
+      setScope(it.mode)
+      setQ('')
+      setHi(0)
+      inputRef.current?.focus()
+      return
+    }
     close()
     it.run()
   }
@@ -372,12 +458,23 @@ export function CommandPalette() {
         <input
           ref={inputRef}
           className="palette__input"
-          placeholder="Type a command — spawn, arrange, export, jump…"
+          placeholder={
+            scope === 'notes'
+              ? 'Find a note, or type to create one…'
+              : 'Type a command — spawn, arrange, export, jump…'
+          }
           value={q}
           spellCheck={false}
           onChange={(e) => {
-            setQ(e.target.value)
+            const v = e.target.value
             setHi(0)
+            // `rnotes ` drops you into the notes scope and eats the trigger
+            if (scope !== 'notes' && NOTES_TRIGGER.test(v)) {
+              setScope('notes')
+              setQ(v.replace(NOTES_TRIGGER, ''))
+              return
+            }
+            setQ(v)
           }}
           onKeyDown={(e) => {
             e.stopPropagation()
@@ -386,6 +483,21 @@ export function CommandPalette() {
             if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
               e.preventDefault()
               return close()
+            }
+            // ⇧← / ⇧→ cycle the scope chips
+            if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+              e.preventDefault()
+              const i = SCOPES.findIndex((x) => x.id === scope)
+              const d = e.key === 'ArrowRight' ? 1 : -1
+              setScope(SCOPES[(i + d + SCOPES.length) % SCOPES.length].id)
+              setHi(0)
+              return
+            }
+            // backspace on an empty box leaves a scope, like Raycast
+            if (e.key === 'Backspace' && q === '' && scope !== 'all') {
+              e.preventDefault()
+              setScope('all')
+              return
             }
             if (e.key === 'ArrowDown') {
               e.preventDefault()
@@ -399,6 +511,23 @@ export function CommandPalette() {
             }
           }}
         />
+        <div className="palette__scopes">
+          {SCOPES.map((sc) => (
+            <button
+              key={sc.id}
+              className={`palette__chip${sc.id === scope ? ' palette__chip--on' : ''}`}
+              onPointerDown={(e) => {
+                e.preventDefault()
+                setScope(sc.id)
+                setHi(0)
+                inputRef.current?.focus()
+              }}
+            >
+              {sc.label}
+            </button>
+          ))}
+          <span className="palette__cycle">⇧← ⇧→</span>
+        </div>
         <div className="palette__list">
           {filtered.length === 0 && <div className="palette__empty">no matches</div>}
           {filtered.map((it, i) => (

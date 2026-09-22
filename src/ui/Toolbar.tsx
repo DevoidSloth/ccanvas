@@ -9,6 +9,7 @@ import {
   IconFiles,
   IconDiff,
   IconEditor,
+  IconVsCode,
 } from './icons'
 
 type IconCmp = (p: { className?: string; size?: number }) => JSX.Element
@@ -23,7 +24,8 @@ const LAUNCHERS: { kind: WidgetKind; Icon: IconCmp; label: string; keys: string 
 const PANELS: { kind: WidgetKind; Icon: IconCmp; label: string }[] = [
   { kind: 'files', Icon: IconFiles, label: 'File tree' },
   { kind: 'diff', Icon: IconDiff, label: 'Git panel' },
-  { kind: 'editor', Icon: IconEditor, label: 'Editor' },
+  { kind: 'editor', Icon: IconEditor, label: 'Editor (Monaco)' },
+  { kind: 'vscode', Icon: IconVsCode, label: 'VS Code (⌘⇧V)' },
   { kind: 'note', Icon: IconNote, label: 'Note' },
 ]
 

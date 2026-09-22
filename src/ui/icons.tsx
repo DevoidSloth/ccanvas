@@ -491,3 +491,10 @@ export const IconPin = (p: P) => (
     <path d="M12 14v6" />
   </S>
 )
+
+// Angle brackets around a slash — the VS Code widget.
+export const IconVsCode = (p: P) => (
+  <S {...p}>
+    <path d="M8.5 8.5L5 12l3.5 3.5M15.5 8.5L19 12l-3.5 3.5M13.2 6.5l-2.4 11" />
+  </S>
+)
