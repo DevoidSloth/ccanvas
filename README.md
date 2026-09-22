@@ -41,12 +41,12 @@ running agent.
 
 | | |
 | --- | --- |
-| 🖥️ **VS Code, embedded** | `⌘⇧V` opens the real VS Code (`code serve-web`) as a widget, scoped to the canvas folder, with extensions from Open VSX — no separate window to manage |
-| 🖼️ **Drag & drop into agents** | Drag a file — an image, a screenshot, anything — from Finder/Explorer straight onto a terminal or agent widget; it's pasted in as a path Claude Code reads as an attachment. The widget outlines while you're hovering over it |
-| 🎨 **Your terminal, not a generic one** | Terminal widgets pick up your machine's real terminal profile — font, cursor, palette (iTerm2's default profile today) — so a ccanvas terminal looks like the one you already live in |
-| 🧠 **Memory panel** | A side dock renders Claude's own cross-session memory for the bound folder as a force-directed graph — nodes, links, and types, read live from `~/.claude/projects/…/memory/` |
+| 🖥️ **VS Code, embedded** | `⌘⇧V` opens the real VS Code (`code serve-web`) as a widget, scoped to the canvas folder, with extensions from Open VSX — no separate window to manage. Needs the `code` CLI on PATH (VS Code → *Shell Command: Install 'code' command*); works in both the desktop app and the browser build |
+| 🖼️ **Drag & drop into agents** | Drag a file — an image, a screenshot, anything — from Finder/Explorer straight onto a terminal or agent widget; it's pasted in as a path Claude Code reads as an attachment. The widget outlines while you're hovering over it. Desktop app only |
+| 🎨 **Your terminal, not a generic one** | On macOS, terminal widgets pick up your default iTerm2 profile — font, cursor, ANSI palette — so a ccanvas terminal looks like the one you already live in; anything it can't read falls back to the built-in theme, as does every other platform today |
+| 🧠 **Memory panel** | A side dock renders Claude's own cross-session memory for the bound folder as a force-directed graph — nodes, links, and types, read straight from `~/.claude/projects/…/memory/` each time you open it |
 | 🔢 **Hold ⌘ to see terminal numbers** | Hold `⌘` for a beat and every terminal shows the digit that `⌘1`–`⌘9` jumps to; let go and they're gone again |
-| 📛 **Self-naming sessions** | Tabs and widgets pick up a sensible title from what's actually running in them instead of staying "untitled" |
+| 📛 **Agent titles that stay in sync** | A Claude agent widget adopts the name you `/rename` inside the session, or the title Claude generates after the first prompt, instead of sitting at "claude agent" forever |
 | 🪶 **A slimmer toolbar** | Fewer buttons, same power — the vector-drawing tools and GitHub-issue widgets from upstream are gone from the chrome; the surface is just Claude, a shell, and the files between them |
 
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
@@ -91,7 +91,7 @@ real terminal in the canvas folder with `claude` already running.
 Terminal widgets auto-connect and fall back to a small in-browser shell when the
 backend isn't running; the footer pill shows `pty` (live) or `local`
 (fallback). Without the backend you can still bind a folder by typing a path.
-File drag-and-drop and the VS Code widget need the desktop app.
+File drag-and-drop needs the desktop app; the VS Code widget works here too.
 
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
 
@@ -107,7 +107,7 @@ File drag-and-drop and the VS Code widget need the desktop app.
 | **Agent orchestration** | Per-agent activity dot (idle/working/waiting), idle notifications, broadcast-to-many, per-agent model/prompt/flags |
 | **Context meter** | Each agent's bar shows how full its context window is (read from its session transcript), with a one-click **compact** past 70% |
 | **Plan usage** | The top-bar pill shows Claude's own session and weekly limit % with reset times, using your Claude Code sign-in (desktop app); falls back to a local token estimate |
-| **Memory panel** | Claude's cross-session memory for the bound folder, rendered as a live graph you can pan, filter by type, and click into |
+| **Memory panel** | Claude's cross-session memory for the bound folder, rendered as a graph you can pan, filter by type, and click into |
 | **Agent roster** | Mission-control list of every agent across all tabs: status, cost/turns, last line, click-to-focus, and a composer to message one or broadcast to all |
 | **Tracking camera** | Follow an agent and watch every file it touches spawn as a viewer in an **orbit** around it, arrows pointing back; the camera stays framed on the action |
 | **Transcript widget** | An agent's *real* conversation rendered from its session JSONL: clean text + tool chips, free of terminal box-drawing chrome, following the session live |
