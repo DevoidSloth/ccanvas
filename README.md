@@ -66,6 +66,18 @@ IO, and an **in-process PTY** per terminal, a real shell with no separate server
 and no WebSocket hop. Requires the Rust toolchain (`rustup`) and, on Windows,
 the WebView2 runtime (preinstalled on Windows 11).
 
+**Downloaded a prebuilt macOS release instead of building it?** The app isn't
+notarized (that needs a paid Apple Developer account), so Gatekeeper will
+flag it as being from an unidentified developer the first time you open it.
+Either right-click `ccanvas.app` → *Open* → confirm *Open* in the dialog, or
+strip the quarantine flag from the Terminal:
+
+```bash
+xattr -cr /Applications/ccanvas.app
+```
+
+You only need to do this once per download.
+
 ### Web app
 
 ```bash
