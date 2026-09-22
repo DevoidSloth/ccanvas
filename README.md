@@ -1,27 +1,55 @@
 <div align="center">
 
-# ccanvas
+<img src="docs/banner.svg" alt="ccanvas — an infinite canvas for driving Claude Code" width="100%" />
+
+<p></p>
+
+[![Desktop](https://img.shields.io/badge/desktop-Tauri%202-e5e0d8?style=flat-square&labelColor=1f1e1d)](https://tauri.app)
+[![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-e5e0d8?style=flat-square&labelColor=1f1e1d)](#stack)
+[![Core](https://img.shields.io/badge/core-Rust-e5e0d8?style=flat-square&labelColor=1f1e1d)](src-tauri)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-e5e0d8?style=flat-square&labelColor=1f1e1d)](#quick-start)
+[![License](https://img.shields.io/badge/license-Apache--2.0-e5e0d8?style=flat-square&labelColor=1f1e1d)](LICENSE)
 
 **An infinite canvas for driving Claude Code.**
 *Excalidraw, but the boxes are real terminals, agents, and live previews.*
 
-Spawn shells, Claude agents, editors, and web previews onto a boundless dark
-surface, then wire them together with arrows that actually run. Every tab is a
+Spawn shells, Claude agents, editors, and VS Code onto a boundless dark
+surface, then arrange them the way you'd sketch a whiteboard. Every tab is a
 self-contained `.ccnvs` workspace you can save, reopen, and share.
 
 </div>
 
 ![ccanvas: multiple agents, a live editor, a file tree, and notes on one infinite canvas](docs/screenshot.png)
 
----
+<img src="docs/divider.svg" alt="" width="100%" height="20" />
 
 ## Why
 
 A terminal multiplexer gives you panes; ccanvas gives you *space*. Lay out a
 fleet of agents the way you'd sketch them on a whiteboard, watch each one's
-status at a glance, and see how full each one's context is. When the canvas gets crowded, the **agent roster**, **canvas
-search**, and a **tracking camera** that orbits an agent's files keep you
-oriented.
+status at a glance, and see how full each one's context is. When the canvas
+gets crowded, the **agent roster**, **canvas search**, and a **tracking
+camera** that orbits an agent's files keep you oriented.
+
+This branch trims the toolbox down to what actually gets used driving
+Claude day to day — agents, terminals, files, diffs, and editors — and
+spends that space on making each of those sharper: a real VS Code, terminal
+fidelity that matches your own shell, and drag‑and‑drop straight into a
+running agent.
+
+## What's new on this branch
+
+| | |
+| --- | --- |
+| 🖥️ **VS Code, embedded** | `⌘⇧V` opens the real VS Code (`code serve-web`) as a widget, scoped to the canvas folder, with extensions from Open VSX — no separate window to manage |
+| 🖼️ **Drag & drop into agents** | Drag a file — an image, a screenshot, anything — from Finder/Explorer straight onto a terminal or agent widget; it's pasted in as a path Claude Code reads as an attachment. The widget outlines while you're hovering over it |
+| 🎨 **Your terminal, not a generic one** | Terminal widgets pick up your machine's real terminal profile — font, cursor, palette (iTerm2's default profile today) — so a ccanvas terminal looks like the one you already live in |
+| 🧠 **Memory panel** | A side dock renders Claude's own cross-session memory for the bound folder as a force-directed graph — nodes, links, and types, read live from `~/.claude/projects/…/memory/` |
+| 🔢 **Hold ⌘ to see terminal numbers** | Hold `⌘` for a beat and every terminal shows the digit that `⌘1`–`⌘9` jumps to; let go and they're gone again |
+| 📛 **Self-naming sessions** | Tabs and widgets pick up a sensible title from what's actually running in them instead of staying "untitled" |
+| 🪶 **A slimmer toolbar** | Fewer buttons, same power — the vector-drawing tools and GitHub-issue widgets from upstream are gone from the chrome; the surface is just Claude, a shell, and the files between them |
+
+<img src="docs/divider.svg" alt="" width="100%" height="20" />
 
 ## Quick start
 
@@ -63,8 +91,9 @@ real terminal in the canvas folder with `claude` already running.
 Terminal widgets auto-connect and fall back to a small in-browser shell when the
 backend isn't running; the footer pill shows `pty` (live) or `local`
 (fallback). Without the backend you can still bind a folder by typing a path.
+File drag-and-drop and the VS Code widget need the desktop app.
 
----
+<img src="docs/divider.svg" alt="" width="100%" height="20" />
 
 ## What's in here
 
@@ -73,10 +102,12 @@ backend isn't running; the footer pill shows `pty` (live) or `local`
 | **Infinite canvas** | Pan (`H` / middle-mouse / two-finger scroll), smooth zoom (⌘/Ctrl-scroll), dot grid, minimap |
 | **Quick insert** | `Space` drops text at the cursor; press `/` then a widget name (`agent` `term` `files` `diff` `editor` `note`) to spawn one |
 | **Command palette** | ⌘/Ctrl-K to spawn widgets, arrange, switch tabs, open panels, insert prompts, export, or jump to a widget |
-| **Widgets** | Claude agent · Terminal · Transcript · File tree · Git panel · Editor (Monaco) · Markdown note |
+| **Widgets** | Claude agent · Terminal · Transcript · File tree · Git panel · Editor (Monaco) · **VS Code** · Markdown note |
+| **Drag & drop** | Drop a file from the OS onto a terminal or agent to paste its path in — the way you'd hand Claude a screenshot |
 | **Agent orchestration** | Per-agent activity dot (idle/working/waiting), idle notifications, broadcast-to-many, per-agent model/prompt/flags |
 | **Context meter** | Each agent's bar shows how full its context window is (read from its session transcript), with a one-click **compact** past 70% |
 | **Plan usage** | The top-bar pill shows Claude's own session and weekly limit % with reset times, using your Claude Code sign-in (desktop app); falls back to a local token estimate |
+| **Memory panel** | Claude's cross-session memory for the bound folder, rendered as a live graph you can pan, filter by type, and click into |
 | **Agent roster** | Mission-control list of every agent across all tabs: status, cost/turns, last line, click-to-focus, and a composer to message one or broadcast to all |
 | **Tracking camera** | Follow an agent and watch every file it touches spawn as a viewer in an **orbit** around it, arrows pointing back; the camera stays framed on the action |
 | **Transcript widget** | An agent's *real* conversation rendered from its session JSONL: clean text + tool chips, free of terminal box-drawing chrome, following the session live |
@@ -89,6 +120,7 @@ backend isn't running; the footer pill shows `pty` (live) or `local`
 | **Tabs** | Multiple `.ccnvs` workspaces open at once, each bound to its own folder |
 | **Persistence** | Save/Open into the canvas folder (backend) or File System Access API; reusable widget-layout templates; PNG/SVG export |
 
+<img src="docs/divider.svg" alt="" width="100%" height="20" />
 
 ## Watching agents work
 
@@ -120,6 +152,8 @@ content to the snapshot but never deletes files the agent created afterwards.
 (Untracked files at checkpoint time aren't captured.) Requires the canvas folder
 to be a git repo.
 
+<img src="docs/divider.svg" alt="" width="100%" height="20" />
+
 ## Keyboard
 
 | Key | Action |
@@ -132,6 +166,10 @@ to be a git repo.
 | ⌘/Ctrl + scroll | zoom to cursor |
 | ⌘/Ctrl + `S` / `O` / `N` | save · open · new canvas |
 | ⌘/Ctrl + `T` / `Shift T` | new terminal · new Claude agent |
+| ⌘/Ctrl + `Shift V` | new VS Code widget for this canvas's folder |
+| hold ⌘/Ctrl | show the jump-number on every terminal |
+| ⌘/Ctrl + `1`–`9` | jump to and focus the Nth terminal |
+| ⌘/Ctrl + `Shift ]` / `[` | next · previous terminal |
 | ⌘/Ctrl + `W` | close the focused widget (quits the desktop app when none are left) |
 | ⌘/Ctrl + `Z` / `Shift Z` | undo · redo |
 | ⌘/Ctrl + `C` / `X` / `V` / `D` | copy · cut · paste · duplicate |
@@ -157,11 +195,16 @@ backend.
   source of truth and what serializes to `.ccnvs`.
 - **`src/canvas/`**: pointer/zoom state machine, SVG vector layer, inline text.
 - **`src/widgets/`**: `WidgetFrame` chrome (drag/resize/z-order) plus per-type
-  bodies (terminal, transcript, editor, diff, data, plot, …).
+  bodies (terminal, transcript, editor, `VsCodeBody`, diff, data, plot, …).
 - **`src/lib/backend.ts`**: native dialog/file IO, choosing Tauri commands → HTTP
   bridge → graceful no-op by `isTauri()`.
 - **`src/lib/terminal.ts`**: terminal transport, choosing in-process Tauri PTY →
   WebSocket bridge → in-browser fallback shell.
+- **`src/lib/termProfile.ts`**: reads the user's own terminal look (font, cursor,
+  palette) from the machine and feeds it to xterm as the widget's theme.
+- **`src/lib/fileDrop.ts`**: listens for the OS drag-drop the webview otherwise
+  swallows, finds the terminal/agent under the cursor, and pastes the dropped
+  paths in as a bracketed paste.
 - **`src/lib/transcript.ts`**: reads and parses Claude Code session JSONL (last
   turn for flow piping, touched files for the tracking camera, full conversation
   for the transcript widget).
@@ -169,12 +212,13 @@ backend.
   satellite viewers in an orbit, and keeps the camera framed.
 - **`src/lib/checkpoints.ts`**: git-backed working-tree checkpoints.
 - **`src-tauri/`**: the Rust app: `src/pty.rs` (a `portable-pty` shell per widget,
-  streaming `pty:data`/`pty:exit` events) and `src/files.rs` (native dialogs +
-  fs).
+  streaming `pty:data`/`pty:exit` events), `src/editor.rs` (the VS Code
+  `serve-web` process + local proxy), `src/term_profile.rs` (reads the host
+  terminal's theme), and `src/files.rs` (native dialogs + fs).
 - **`server/pty-server.mjs`**: the optional web-mode backend (same protocol, over
   `ws`/`http`) for when you run in a plain browser.
 
----
+<img src="docs/divider.svg" alt="" width="100%" height="20" />
 
 <div align="center">
 <sub>See <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> to hack on it · <a href="LICENSE">LICENSE</a></sub>
