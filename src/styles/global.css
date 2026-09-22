@@ -3301,6 +3301,45 @@ body.is-panning * {
 .editor__path-input:focus {
   border-color: var(--accent-line);
 }
+.editor__path-wrap {
+  position: relative;
+}
+.editor__path-suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--bg-raised, var(--bg));
+  border: 1px solid var(--line-hard);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-panel);
+  padding: 4px;
+  z-index: 5;
+}
+.editor__path-suggest-item {
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.editor__path-suggest-item--active {
+  background: var(--accent-soft);
+}
+.editor__path-suggest-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+.editor__path-suggest-item--active .editor__path-suggest-name {
+  color: var(--accent-bright);
+}
+.editor__path-suggest-name--dir {
+  color: var(--ink-dim);
+}
+.editor__path-suggest-item--active .editor__path-suggest-name--dir {
+  color: var(--accent-bright);
+}
 
 /* doc + log */
 .doc__view {
