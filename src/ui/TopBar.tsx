@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore, selectActive } from '../store/workspace'
 import { baseName, isTauri } from '../lib/backend'
 import { AGENT_COLORS, type WidgetElement } from '../lib/types'
@@ -70,7 +70,51 @@ function Tabs() {
   const newTab = useStore((s) => s.newTab)
   const renameTab = useStore((s) => s.renameTab)
   const togglePinTab = useStore((s) => s.togglePinTab)
+  const moveTab = useStore((s) => s.moveTab)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const stripRef = useRef<HTMLDivElement>(null)
+  const dragCleanup = useRef<(() => void) | null>(null)
+  useEffect(() => () => dragCleanup.current?.(), [])
+
+  // Drag a tab sideways to reorder. Pointer events (not HTML5 drag & drop) so it
+  // doesn't fight the window drag region or the file-drop handler. Reordering is
+  // live: the tab lands wherever its centre has crossed the neighbours' midpoints.
+  const startDrag = (e: React.PointerEvent, id: string) => {
+    if (e.button !== 0 || editingId === id) return
+    const startX = e.clientX
+    let dragging = false
+    const onMove = (ev: PointerEvent) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientX - startX) < 4) return
+        dragging = true
+        setDragId(id)
+      }
+      const strip = stripRef.current
+      if (!strip) return
+      const els = Array.from(strip.querySelectorAll<HTMLElement>(':scope > .tab'))
+      const mine = useStore.getState().tabs.findIndex((t) => t.id === id)
+      let to = 0
+      els.forEach((node, i) => {
+        if (i === mine) return
+        const r = node.getBoundingClientRect()
+        if (ev.clientX > r.left + r.width / 2) to++
+      })
+      moveTab(id, to)
+    }
+    const end = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      dragCleanup.current = null
+      setDragId(null)
+    }
+    dragCleanup.current?.()
+    dragCleanup.current = end
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+  }
 
   const tabMenu = (e: React.MouseEvent, id: string, pinned: boolean) =>
     openContextMenu(e, [
@@ -87,14 +131,19 @@ function Tabs() {
     ])
 
   return (
-    <div className="tabs">
+    <div className="tabs" ref={stripRef}>
       {tabs.map((t, i) => (
         <div
           key={t.id}
           className={`tab${t.id === activeTabId ? ' tab--active' : ''}${
             t.pinned ? ' tab--pinned' : ''
-          }${t.pinned && !tabs[i + 1]?.pinned ? ' tab--pinned-last' : ''}`}
-          onPointerDown={() => switchTab(t.id)}
+          }${t.pinned && !tabs[i + 1]?.pinned ? ' tab--pinned-last' : ''}${
+            t.id === dragId ? ' tab--dragging' : ''
+          }`}
+          onPointerDown={(e) => {
+            switchTab(t.id)
+            startDrag(e, t.id)
+          }}
           onDoubleClick={() => setEditingId(t.id)}
           onContextMenu={(e) => tabMenu(e, t.id, !!t.pinned)}
           title={`${t.name}${t.pinned ? ' · pinned' : ''}${t.dirty ? ' — unsaved (⌘S)' : ''}`}

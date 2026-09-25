@@ -521,8 +521,10 @@ export function TerminalBody({
           const turns = useAgents.getState().metrics[el.id]?.turns ?? 0
           if (ready && launchTasks.length === 0) {
             if (flowArmTurn === null) flowArmTurn = turns
-            else if (!waiting && turns > flowArmTurn)
+            else if (!waiting && turns > flowArmTurn) {
+              useAgents.getState().markFinished(el.id)
               void onAgentTurnComplete(el.id, turns, tail)
+            }
           }
         }
         onSettle()

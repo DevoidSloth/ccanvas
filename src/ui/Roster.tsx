@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { viewCenter } from '../lib/view'
 import { useStore } from '../store/workspace'
-import { useAgents, sendPrompt } from '../lib/agents'
+import { useAgents, useDisplayStatus, sendPrompt } from '../lib/agents'
 import { readTranscript, extractLastAssistant } from '../lib/transcript'
 import type { WidgetElement, Workspace } from '../lib/types'
 import { IconClose, IconBroadcast, IconTrack } from './icons'
@@ -51,6 +51,16 @@ function useLastMessages(rows: Row[]): Record<string, string> {
 // line, click-to-focus, and a composer that sends to one agent or broadcasts to
 // all. The spatial canvas is great for layout but poor at "is anything stuck?" —
 // this is the at-scale answer.
+function RosterDot({ id }: { id: string }) {
+  const st = useDisplayStatus(id) ?? 'off'
+  return (
+    <span
+      className={`agent-dot agent-dot--${st}`}
+      title={st === 'done' ? 'just finished' : st}
+    />
+  )
+}
+
 export function Roster() {
   const tabs = useStore((s) => s.tabs)
   const activeTabId = useStore((s) => s.activeTabId)
@@ -64,7 +74,6 @@ export function Roster() {
   const stopTrackingAgent = useStore((s) => s.stopTrackingAgent)
   const setOpenPanel = useStore((s) => s.setOpenPanel)
 
-  const status = useAgents((s) => s.status)
   const metrics = useAgents((s) => s.metrics)
 
   const [text, setText] = useState('')
@@ -125,7 +134,6 @@ export function Roster() {
           <div className="panel__empty">No agents yet. Start one with ⌘⇧T.</div>
         )}
         {rows.map((row) => {
-          const st = status[row.agent.id] ?? 'off'
           const m = metrics[row.agent.id]
           const ll = lastMessage[row.agent.id]
           const tracking = trackingId === row.agent.id
@@ -135,7 +143,7 @@ export function Roster() {
               className={`roster__row${target === row.agent.id ? ' roster__row--target' : ''}`}
               onClick={() => focus(row)}
             >
-              <span className={`agent-dot agent-dot--${st}`} title={st} />
+              <RosterDot id={row.agent.id} />
               <div className="roster__main">
                 <div className="roster__top">
                   <span className="roster__name">{row.agent.title}</span>

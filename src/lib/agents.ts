@@ -5,6 +5,7 @@
 // Kept in its own tiny zustand store so high-frequency status churn only
 // re-renders the status dots, not the whole canvas.
 
+import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 
 export type AgentStatus =
@@ -22,11 +23,15 @@ type StatusState = {
   metrics: Record<string, AgentMetrics>
   /** the most recent meaningful line of each agent's output (for the roster) */
   lastLine: Record<string, string>
+  /** when each agent last finished a turn (ms epoch); cleared once it works again */
+  finishedAt: Record<string, number>
   setStatus: (id: string, s: AgentStatus) => void
   /** record one working→idle turn that lasted `ms` */
   recordTurn: (id: string, ms: number) => void
   /** latest cost (USD) scraped from `/cost` output */
   setCost: (id: string, usd: number) => void
+  /** stamp the moment an agent finished answering */
+  markFinished: (id: string) => void
   /** stash the latest output line shown next to the agent in the roster */
   setLastLine: (id: string, line: string) => void
   clear: (id: string) => void
@@ -36,10 +41,20 @@ export const useAgents = create<StatusState>((set) => ({
   status: {},
   metrics: {},
   lastLine: {},
+  finishedAt: {},
   setStatus: (id, s) =>
-    set((st) =>
-      st.status[id] === s ? st : { status: { ...st.status, [id]: s } },
-    ),
+    set((st) => {
+      if (st.status[id] === s) return st
+      const next: Partial<StatusState> = { status: { ...st.status, [id]: s } }
+      if (s === 'working' && id in st.finishedAt) {
+        const finishedAt = { ...st.finishedAt }
+        delete finishedAt[id]
+        next.finishedAt = finishedAt
+      }
+      return next
+    }),
+  markFinished: (id) =>
+    set((st) => ({ finishedAt: { ...st.finishedAt, [id]: Date.now() } })),
   recordTurn: (id, ms) =>
     set((st) => {
       const m = st.metrics[id] ?? { turns: 0, activeMs: 0 }
@@ -62,16 +77,48 @@ export const useAgents = create<StatusState>((set) => ({
     ),
   clear: (id) =>
     set((st) => {
-      if (!(id in st.status) && !(id in st.metrics) && !(id in st.lastLine)) return st
+      if (
+        !(id in st.status) &&
+        !(id in st.metrics) &&
+        !(id in st.lastLine) &&
+        !(id in st.finishedAt)
+      )
+        return st
       const status = { ...st.status }
       const metrics = { ...st.metrics }
       const lastLine = { ...st.lastLine }
+      const finishedAt = { ...st.finishedAt }
       delete status[id]
       delete metrics[id]
       delete lastLine[id]
-      return { status, metrics, lastLine }
+      delete finishedAt[id]
+      return { status, metrics, lastLine, finishedAt }
     }),
 }))
+
+/** How long an agent shows as "just finished" (purple) after answering. */
+export const RECENT_FINISH_MS = 2 * 60 * 1000
+
+/**
+ * The status to display: an idle agent that finished a turn within the last
+ * two minutes reads as 'done' (purple) before settling back to plain idle.
+ * Re-renders itself when the window expires.
+ */
+export function useDisplayStatus(id: string): AgentStatus | 'done' | undefined {
+  const status = useAgents((s) => s.status[id])
+  const finishedAt = useAgents((s) => s.finishedAt[id])
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (status !== 'idle' || finishedAt == null) return
+    const left = finishedAt + RECENT_FINISH_MS - Date.now()
+    if (left <= 0) return
+    const t = setTimeout(() => tick((n) => n + 1), left + 50)
+    return () => clearTimeout(t)
+  }, [status, finishedAt])
+  if (status === 'idle' && finishedAt != null && Date.now() - finishedAt < RECENT_FINISH_MS)
+    return 'done'
+  return status
+}
 
 /** Best-effort scrape of a USD cost from `/cost` output. null if none found. */
 export function scrapeCost(text: string): number | null {

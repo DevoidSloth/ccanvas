@@ -37,6 +37,7 @@
   --led-idle: #7fb58a;
   --led-working: #d97757;
   --led-waiting: #e3b35c;
+  --led-done: #a78bfa;
 
   /* widget kind accents */
   --k-terminal: #d97757;
@@ -486,6 +487,15 @@ textarea {
   position: relative;
   flex-shrink: 0;
   transition: color 0.13s ease, background 0.13s ease;
+}
+.tab {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tab.tab--dragging {
+  cursor: grabbing;
+  z-index: 1;
+  box-shadow: inset 0 0 0 1px var(--accent-line), var(--shadow-panel);
 }
 .tab:hover {
   color: var(--ink-dim);
@@ -2850,6 +2860,10 @@ body.is-panning * {
   background: var(--led-idle);
   box-shadow: 0 0 5px rgba(127, 181, 138, 0.5);
 }
+.agent-dot--done {
+  background: var(--led-done);
+  box-shadow: 0 0 6px rgba(167, 139, 250, 0.55);
+}
 .agent-dot--working {
   background: var(--led-working);
   box-shadow: 0 0 8px var(--led-working);
@@ -5177,6 +5191,10 @@ body.is-panning * {
 .term-card--idle .term-card__dot {
   background: var(--led-idle);
 }
+.term-card--done .term-card__dot {
+  background: var(--led-done);
+  box-shadow: 0 0 0.5em var(--led-done);
+}
 .term-card--working .term-card__dot {
   background: var(--led-working);
   box-shadow: 0 0 0.6em var(--led-working);
@@ -5305,4 +5323,72 @@ body.is-panning * {
 .vscode__retry:hover {
   background: var(--accent);
   color: #1f0f09;
+}
+
+/* ---------- minibuffer (emacs-style bottom bar: ⌃X ⌃F tab finder) ---------- */
+.mini {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  background: var(--panel);
+  border-top: 1px solid var(--line-hard);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.mini__echo {
+  display: block;
+  padding: 7px 12px;
+  color: var(--ink-dim);
+}
+.mini__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+}
+.mini__prompt {
+  color: var(--accent);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.mini__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--ink);
+  font: inherit;
+  caret-color: var(--accent);
+}
+.mini__note {
+  color: var(--ink-faint);
+}
+.mini__cands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  max-height: 96px;
+  overflow-y: auto;
+  padding: 6px 8px 2px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mini__cand {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: var(--ink-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.mini__cand--cur {
+  color: var(--ink);
+}
+.mini__cand--on {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
 }

@@ -189,6 +189,8 @@ export type Store = {
   /** reusable prompt snippets (prompt library) */
   prompts: Prompt[]
   paletteOpen: boolean
+  /** emacs-style bottom bar: 'chord' = ⌃X pressed, waiting for ⌃F; 'tab' = tab finder */
+  minibuffer: 'chord' | 'tab' | null
   agentWizard: AgentWizardCtx | null
   /** which docked side panel is open (roster / prompts / checkpoints), if any */
   openPanel: SidePanel | null
@@ -215,6 +217,7 @@ export type Store = {
   closeTab: (id: string) => void
   switchTab: (id: string) => void
   renameTab: (id: string, name: string) => void
+  moveTab: (id: string, toIndex: number) => void
   /** pin/unpin a tab; pinned tabs are kept together at the front */
   togglePinTab: (id: string) => void
   setActiveDir: () => Promise<void>
@@ -291,6 +294,7 @@ export type Store = {
 
   // ----- command palette -----
   setPaletteOpen: (open: boolean) => void
+  setMinibuffer: (m: 'chord' | 'tab' | null) => void
 
   // ----- side panels / search -----
   setOpenPanel: (p: SidePanel | null) => void
@@ -350,6 +354,7 @@ export const useStore = create<Store>((set, get) => ({
   templates: loadTemplates(),
   prompts: loadPrompts(),
   paletteOpen: false,
+  minibuffer: null,
   agentWizard: null,
   openPanel: null,
   searchOpen: false,
@@ -492,6 +497,24 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, name, dirty: true } : t)),
     })),
+
+  // Reorder a tab to `toIndex` (its final position). Pinned tabs stay in the
+  // leading group: a tab can only move within its own pinned/unpinned section.
+  moveTab: (id, toIndex) =>
+    set((s) => {
+      const from = s.tabs.findIndex((t) => t.id === id)
+      if (from === -1) return s
+      const me = s.tabs[from]
+      const pinnedCount = s.tabs.filter((t) => t.pinned).length
+      const lo = me.pinned ? 0 : pinnedCount
+      const hi = me.pinned ? pinnedCount - 1 : s.tabs.length - 1
+      const to = Math.max(lo, Math.min(hi, toIndex))
+      if (to === from) return s
+      const tabs = s.tabs.slice()
+      tabs.splice(from, 1)
+      tabs.splice(to, 0, me)
+      return { tabs }
+    }),
 
   togglePinTab: (id) =>
     set((s) => {
@@ -1279,6 +1302,7 @@ export const useStore = create<Store>((set, get) => ({
 
   // ---------- command palette ----------
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+  setMinibuffer: (m) => set({ minibuffer: m }),
 
   // ---------- side panels / search ----------
   setOpenPanel: (p) => set({ openPanel: p }),

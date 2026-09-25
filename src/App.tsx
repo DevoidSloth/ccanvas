@@ -22,6 +22,7 @@ import { PromptLibrary } from './ui/PromptLibrary'
 import { Checkpoints } from './ui/Checkpoints'
 import { MemoryPanel } from './ui/MemoryPanel'
 import { CanvasSearch } from './ui/CanvasSearch'
+import { Minibuffer } from './ui/Minibuffer'
 import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
 import { useTerminalFileDrop } from './lib/fileDrop'
@@ -100,6 +101,41 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  // Emacs chord: ⌃X ⌃F opens the tab finder in the bottom bar. Capture phase so
+  // it works from inside a terminal too (the first ⌃X is swallowed there).
+  // Any other key cancels the chord.
+  useEffect(() => {
+    let timer: number | undefined
+    const clear = () => {
+      window.clearTimeout(timer)
+      if (useStore.getState().minibuffer === 'chord') useStore.getState().setMinibuffer(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      const store = useStore.getState()
+      if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta') return
+      if (store.minibuffer === 'chord') {
+        e.preventDefault()
+        e.stopPropagation()
+        window.clearTimeout(timer)
+        if (e.ctrlKey && !e.metaKey && e.code === 'KeyF') store.setMinibuffer('tab')
+        else store.setMinibuffer(null)
+        return
+      }
+      if (store.minibuffer) return
+      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.code === 'KeyX') {
+        e.preventDefault()
+        e.stopPropagation()
+        store.setMinibuffer('chord')
+        timer = window.setTimeout(clear, 2500)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.clearTimeout(timer)
+    }
   }, [])
 
   useEffect(() => {
@@ -336,6 +372,7 @@ export default function App() {
         {openPanel === 'checkpoints' && <Checkpoints />}
         {openPanel === 'memory' && <MemoryPanel />}
       </main>
+      <Minibuffer />
       <ContextMenuHost />
       <FollowController />
     </div>

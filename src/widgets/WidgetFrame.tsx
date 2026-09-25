@@ -29,7 +29,7 @@ import {
   IconClaude,
   IconInfo,
 } from '../ui/icons'
-import { useAgents, sendTo, sendPrompt, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
+import { useAgents, useDisplayStatus, sendTo, sendPrompt, isLive as isSessionLive, type AgentMetrics } from '../lib/agents'
 import { useAgentContext } from '../lib/context'
 import { useSyncSessionTitle } from '../lib/sessionTitle'
 import { FAR_ZOOM, focusWidget, passesLabelFilter } from '../lib/view'
@@ -632,11 +632,12 @@ const STATUS_LABEL: Record<string, string> = {
   working: 'working',
   waiting: 'needs input',
   idle: 'idle',
+  done: 'just finished',
   connecting: 'connecting',
   off: 'offline',
 }
 function TermCard({ el }: { el: WidgetElement }) {
-  const status = useAgents((s) => s.status[el.id]) ?? 'off'
+  const status = useDisplayStatus(el.id) ?? 'off'
   const lastLine = useAgents((s) => s.lastLine[el.id])
   const folder = el.cwd ? el.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null
   return (
@@ -666,7 +667,7 @@ function CardContext({ el }: { el: WidgetElement }) {
 }
 
 function AgentDot({ id }: { id: string }) {
-  const status = useAgents((s) => s.status[id])
+  const status = useDisplayStatus(id)
   if (!status || status === 'off') return null
   const title =
     status === 'working'
@@ -675,7 +676,9 @@ function AgentDot({ id }: { id: string }) {
         ? 'waiting for input'
         : status === 'connecting'
           ? 'connecting…'
-          : 'idle'
+          : status === 'done'
+            ? 'just finished'
+            : 'idle'
   return <span className={`agent-dot agent-dot--${status}`} title={title} />
 }
 
