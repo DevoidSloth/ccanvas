@@ -4,7 +4,7 @@ import { useStore } from '../store/workspace'
 import { useAgents, useDisplayStatus, sendPrompt } from '../lib/agents'
 import { readTranscript, extractLastAssistant } from '../lib/transcript'
 import type { WidgetElement, Workspace } from '../lib/types'
-import { IconClose, IconBroadcast, IconTrack } from './icons'
+import { IconClose, IconBroadcast } from './icons'
 import '../styles/agent-tools.css'
 
 
@@ -64,14 +64,11 @@ function RosterDot({ id }: { id: string }) {
 export function Roster() {
   const tabs = useStore((s) => s.tabs)
   const activeTabId = useStore((s) => s.activeTabId)
-  const trackingId = useStore((s) => s.trackingAgentId)
   const switchTab = useStore((s) => s.switchTab)
   const setCamera = useStore((s) => s.setCamera)
   const setSelection = useStore((s) => s.setSelection)
   const setActiveWidget = useStore((s) => s.setActiveWidget)
   const bringToFront = useStore((s) => s.bringToFront)
-  const startTrackingAgent = useStore((s) => s.startTrackingAgent)
-  const stopTrackingAgent = useStore((s) => s.stopTrackingAgent)
   const setOpenPanel = useStore((s) => s.setOpenPanel)
 
   const metrics = useAgents((s) => s.metrics)
@@ -136,7 +133,6 @@ export function Roster() {
         {rows.map((row) => {
           const m = metrics[row.agent.id]
           const ll = lastMessage[row.agent.id]
-          const tracking = trackingId === row.agent.id
           return (
             <div
               key={row.agent.id}
@@ -158,17 +154,6 @@ export function Roster() {
                 </div>
                 {ll && <div className="roster__last">{ll}</div>}
               </div>
-              <button
-                className={`roster__track${tracking ? ' roster__track--on' : ''}`}
-                title={tracking ? 'Stop tracking camera' : 'Track this agent (orbit its files)'}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (tracking) stopTrackingAgent(false)
-                  else void startTrackingAgent(row.agent.id)
-                }}
-              >
-                <IconTrack size={15} />
-              </button>
             </div>
           )
         })}

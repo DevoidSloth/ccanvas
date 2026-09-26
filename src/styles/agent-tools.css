@@ -14,7 +14,7 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
-  background: rgba(38, 38, 36, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -151,27 +151,6 @@
   text-overflow: ellipsis;
   margin-top: 2px;
 }
-.roster__track {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--ink-faint);
-  flex-shrink: 0;
-}
-.roster__track:hover {
-  color: var(--ink);
-  background: var(--panel);
-}
-.roster__track--on {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
 /* ---------- composer (roster) ---------- */
 .panel__composer {
   border-top: 1px solid var(--line);
@@ -437,7 +416,7 @@
   align-items: center;
   gap: 10px;
   padding: 6px 8px 6px 13px;
-  background: rgba(38, 38, 36, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--accent-line);
@@ -673,4 +652,156 @@
   min-height: 0;
   overflow: hidden;
   border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+
+/* ---------- settings panel ---------- */
+.set {
+  gap: 4px;
+  padding: 8px 10px 12px;
+}
+.set__section {
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 8px 3px 4px;
+}
+.set__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 6px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.set__row:hover {
+  background: var(--panel-hi);
+}
+.set__row--custom {
+  cursor: default;
+}
+.set__row input[type='checkbox'] {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.set__main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+.set__label {
+  font-size: 12px;
+  color: var(--ink);
+}
+.set__hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+.set > .set__hint {
+  padding: 2px 3px;
+}
+.set__kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+  background: var(--panel-hi);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 4px;
+}
+.set__bind {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.set__bind .set__kbd {
+  margin-left: 0;
+}
+.set__rm {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-faint);
+}
+.set__rm:hover {
+  background: var(--panel-hi);
+  color: var(--ink);
+}
+.set__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px dashed var(--line-hard);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.set__add:hover {
+  color: var(--ink);
+  border-color: var(--accent-line);
+}
+.set__rec {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--accent);
+  padding: 4px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+.set__rec .set__kbd {
+  margin-left: 0;
+  align-self: flex-start;
+}
+.set__palettes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 0 3px;
+}
+.set__swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 4px 6px;
+  background: transparent;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+.set__swatch:hover {
+  border-color: var(--line-hard);
+}
+.set__swatch--on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.set__chip {
+  display: flex;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+.set__chip span {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+.set__swatch-name {
+  font-size: 11px;
+  color: var(--ink-dim);
 }

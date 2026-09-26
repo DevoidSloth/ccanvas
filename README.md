@@ -59,6 +59,7 @@ running agent.
 npm install
 npm run app        # dev: launches the native window
 npm run app:build  # build an installer → src-tauri/target/release/bundle
+npm run app:install  # macOS: build just the .app and replace /Applications/ccanvas.app
 ```
 
 The desktop build is the real thing: native folder/file dialogs, native file

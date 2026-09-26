@@ -381,8 +381,16 @@ export const IconDatabase = (p: P) => (
 
 export const IconSettings = (p: P) => (
   <S {...p}>
-    <circle cx="12" cy="12" r="3" />
-    <path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3" />
+    <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+    <circle cx="15" cy="7" r="2" />
+    <circle cx="9" cy="17" r="2" />
+  </S>
+)
+export const IconMore = (p: P) => (
+  <S {...p}>
+    <circle cx="5.5" cy="12" r="0.9" fill="currentColor" />
+    <circle cx="12" cy="12" r="0.9" fill="currentColor" />
+    <circle cx="18.5" cy="12" r="0.9" fill="currentColor" />
   </S>
 )
 

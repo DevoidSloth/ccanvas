@@ -26,6 +26,17 @@ import { Minibuffer } from './ui/Minibuffer'
 import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
 import { useTerminalFileDrop } from './lib/fileDrop'
+import { SettingsPanel } from './ui/SettingsPanel'
+import {
+  useSettings,
+  activeBindings,
+  matches,
+  hasModifier,
+  echoCombo,
+  isModifierKey,
+  keyRecorder,
+  type Binding,
+} from './lib/settings'
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
 
@@ -103,33 +114,58 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
-  // Emacs chord: ⌃X ⌃F opens the tab finder in the bottom bar. Capture phase so
-  // it works from inside a terminal too (the first ⌃X is swallowed there).
-  // Any other key cancels the chord.
+  // Tab-finder shortcuts from Settings: ⌃X ⌃F (emacs), `:` / gt / gT (vim),
+  // plus any custom ones. Capture phase so modifier chords work from inside a
+  // terminal too (the prefix is swallowed there); bare keys only fire outside
+  // text fields and terminals. Any key that doesn't continue a chord cancels it.
   useEffect(() => {
     let timer: number | undefined
+    let pending: Binding[] = []
     const clear = () => {
       window.clearTimeout(timer)
+      pending = []
       if (useStore.getState().minibuffer === 'chord') useStore.getState().setMinibuffer(null)
     }
-    const onKey = (e: KeyboardEvent) => {
+    const run = (b: Binding) => {
       const store = useStore.getState()
-      if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta') return
+      if (b.action === 'finder') {
+        store.setMinibuffer('tab', b.prompt)
+        return
+      }
+      store.setMinibuffer(null)
+      const { tabs, activeTabId } = store
+      const i = tabs.findIndex((t) => t.id === activeTabId)
+      const step = b.action === 'nextTab' ? 1 : -1
+      const next = tabs[(i + step + tabs.length) % tabs.length]
+      if (next) store.switchTab(next.id)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (isModifierKey(e) || keyRecorder.active) return
+      const store = useStore.getState()
       if (store.minibuffer === 'chord') {
         e.preventDefault()
         e.stopPropagation()
-        window.clearTimeout(timer)
-        if (e.ctrlKey && !e.metaKey && e.code === 'KeyF') store.setMinibuffer('tab')
-        else store.setMinibuffer(null)
+        const done = pending.find((b) => matches(b.seq[1], e))
+        clear()
+        if (done) run(done)
         return
       }
       if (store.minibuffer) return
-      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.code === 'KeyX') {
-        e.preventDefault()
-        e.stopPropagation()
-        store.setMinibuffer('chord')
-        timer = window.setTimeout(clear, 2500)
+      const editing = isEditableTarget(e.target)
+      const hits = activeBindings(useSettings.getState()).filter(
+        (b) => matches(b.seq[0], e) && (hasModifier(b.seq[0]) || !editing),
+      )
+      if (!hits.length) return
+      e.preventDefault()
+      e.stopPropagation()
+      const now = hits.find((b) => b.seq.length === 1)
+      if (now) {
+        run(now)
+        return
       }
+      pending = hits
+      store.setMinibuffer('chord', `${echoCombo(hits[0].seq[0])} -`)
+      timer = window.setTimeout(clear, 2500)
     }
     window.addEventListener('keydown', onKey, true)
     return () => {
@@ -294,6 +330,15 @@ export default function App() {
     }
   }, [])
 
+  // ccanvas → Settings… (⌘,) in the macOS app menu opens the settings panel
+  useEffect(() => {
+    if (!isTauri()) return
+    const unlisten = listen('menu:open-settings', () => useStore.getState().setOpenPanel('settings'))
+    return () => {
+      void unlisten.then((off) => off())
+    }
+  }, [])
+
   // paste an image from the clipboard onto the canvas
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -371,6 +416,7 @@ export default function App() {
         {openPanel === 'prompts' && <PromptLibrary />}
         {openPanel === 'checkpoints' && <Checkpoints />}
         {openPanel === 'memory' && <MemoryPanel />}
+        {openPanel === 'settings' && <SettingsPanel />}
       </main>
       <Minibuffer />
       <ContextMenuHost />

@@ -232,7 +232,7 @@
 }
 .ghd__badge--del {
   color: #d97757;
-  background: rgba(217, 119, 87, 0.14);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 /* ---------- commit composer ---------- */
@@ -371,6 +371,6 @@
 }
 .ghd__diff .diff__del {
   color: #f0b39b;
-  background: rgba(217, 119, 87, 0.1);
-  box-shadow: inset 3px 0 0 rgba(217, 119, 87, 0.55);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
 }

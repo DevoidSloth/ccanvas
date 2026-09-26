@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStore, selectActive } from '../store/workspace'
+import { useStore, selectActive, type SidePanel } from '../store/workspace'
 import { baseName, isTauri } from '../lib/backend'
 import { AGENT_COLORS, type WidgetElement } from '../lib/types'
 import { isTermWidget } from '../lib/view'
@@ -12,9 +12,10 @@ import {
   IconAgent,
   IconChat,
   IconHistory,
-  IconFollow,
+  IconSettings,
   IconClaude,
   IconPin,
+  IconMore,
 } from './icons'
 import { UsagePill } from './UsagePill'
 import { openContextMenu } from './ContextMenu'
@@ -77,6 +78,35 @@ function Tabs() {
   const dragCleanup = useRef<(() => void) | null>(null)
   useEffect(() => () => dragCleanup.current?.(), [])
 
+  // When the strip overflows, fade whichever edge has more tabs past it
+  // (instead of a scrollbar or a hard cut mid-name).
+  const [fade, setFade] = useState({ l: false, r: false })
+  useEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    const update = () => {
+      const l = strip.scrollLeft > 1
+      const r = strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1
+      setFade((f) => (f.l === l && f.r === r ? f : { l, r }))
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(strip)
+    for (const c of Array.from(strip.children)) ro.observe(c)
+    strip.addEventListener('scroll', update, { passive: true })
+    return () => {
+      ro.disconnect()
+      strip.removeEventListener('scroll', update)
+    }
+  }, [tabs])
+
+  // keep the active tab in view when it changes (⌘1–9, the tab finder, new tab)
+  useEffect(() => {
+    stripRef.current
+      ?.querySelector<HTMLElement>('.tab--active')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeTabId, tabs.length])
+
   // Drag a tab sideways to reorder. Pointer events (not HTML5 drag & drop) so it
   // doesn't fight the window drag region or the file-drop handler. Reordering is
   // live: the tab lands wherever its centre has crossed the neighbours' midpoints.
@@ -131,7 +161,11 @@ function Tabs() {
     ])
 
   return (
-    <div className="tabs" ref={stripRef}>
+    <div className="tabs-wrap">
+    <div
+      className={`tabs${fade.l ? ' tabs--fade-l' : ''}${fade.r ? ' tabs--fade-r' : ''}`}
+      ref={stripRef}
+    >
       {tabs.map((t, i) => (
         <div
           key={t.id}
@@ -187,6 +221,7 @@ function Tabs() {
           )}
         </div>
       ))}
+    </div>
       <button className="tab-add" title="New canvas (⌘N)" onClick={() => void newTab()}>
         <IconPlus />
       </button>
@@ -245,12 +280,20 @@ function LabelFilter() {
   )
 }
 
+const PANELS: { id: SidePanel; label: string; title: string; icon: React.ReactNode }[] = [
+  { id: 'roster', label: 'Agents', title: 'Agents: every agent across your tabs, with status and a composer', icon: <IconAgent /> },
+  { id: 'prompts', label: 'Prompts', title: 'Prompts: saved prompts you can send to any agent', icon: <IconChat /> },
+  { id: 'checkpoints', label: 'Checkpoints', title: 'Checkpoints: git snapshots you can roll back to', icon: <IconHistory /> },
+  { id: 'memory', label: 'Memory', title: "Memory: Claude's memory for this project, as a linked graph", icon: <IconClaude /> },
+  { id: 'settings', label: 'Settings', title: 'Settings: shortcuts and colour palette', icon: <IconSettings /> },
+]
+
+// The panel buttons. When the window is narrow the stylesheet hides them and
+// shows a single ⋯ button instead, which lists every panel in a menu.
 function Tools() {
   const tabs = useStore((s) => s.tabs)
   const openPanel = useStore((s) => s.openPanel)
   const togglePanel = useStore((s) => s.togglePanel)
-  const followAgent = useStore((s) => s.followAgent)
-  const setFollowAgent = useStore((s) => s.setFollowAgent)
 
   const agentCount = tabs.reduce(
     (n, t) => n + t.elements.filter((e) => e.type === 'widget' && e.kind === 'agent').length,
@@ -258,43 +301,40 @@ function Tools() {
   )
   const on = (b: boolean) => `tb-icon${b ? ' tb-icon--on' : ''}`
 
+  const moreMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    openContextMenu({ clientX: r.right, clientY: r.bottom + 4 }, [
+      ...PANELS.map((p) => ({
+        label: p.id === 'roster' && agentCount > 0 ? `${p.label} (${agentCount})` : p.label,
+        icon: p.icon,
+        hint: openPanel === p.id ? 'open' : undefined,
+        onClick: () => togglePanel(p.id),
+      })),
+    ])
+  }
+
   return (
     <div className="topbar__tools">
+      {PANELS.map((p) => (
+        <button
+          key={p.id}
+          className={on(openPanel === p.id)}
+          title={p.title}
+          onClick={() => togglePanel(p.id)}
+        >
+          {p.icon}
+          {p.id === 'roster' && agentCount > 0 && (
+            <span className="tb-icon__badge">{agentCount}</span>
+          )}
+        </button>
+      ))}
       <button
-        className={on(openPanel === 'roster')}
-        title="Agents: every agent across your tabs, with status and a composer"
-        onClick={() => togglePanel('roster')}
+        className={`${on(openPanel !== null)} tb-more`}
+        title="Panels: agents, prompts, checkpoints, memory, settings"
+        onClick={moreMenu}
       >
-        <IconAgent />
+        <IconMore />
         {agentCount > 0 && <span className="tb-icon__badge">{agentCount}</span>}
-      </button>
-      <button
-        className={on(openPanel === 'prompts')}
-        title="Prompts: saved prompts you can send to any agent"
-        onClick={() => togglePanel('prompts')}
-      >
-        <IconChat />
-      </button>
-      <button
-        className={on(openPanel === 'checkpoints')}
-        title="Checkpoints: git snapshots you can roll back to"
-        onClick={() => togglePanel('checkpoints')}
-      >
-        <IconHistory />
-      </button>
-      <button
-        className={on(followAgent)}
-        title="Follow agents: move the view to whichever agent starts working"
-        onClick={() => setFollowAgent(!followAgent)}
-      >
-        <IconFollow />
-      </button>
-      <button
-        className={on(openPanel === 'memory')}
-        title="Memory: Claude's memory for this project, as a linked graph"
-        onClick={() => togglePanel('memory')}
-      >
-        <IconClaude />
       </button>
     </div>
   )

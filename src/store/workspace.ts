@@ -167,7 +167,7 @@ export type AgentWizardCtx = {
 }
 
 /** Side panels that share the right-hand dock (only one open at a time). */
-export type SidePanel = 'roster' | 'prompts' | 'checkpoints' | 'memory'
+export type SidePanel = 'roster' | 'prompts' | 'checkpoints' | 'memory' | 'settings'
 
 export type Store = {
   tabs: Workspace[]
@@ -189,8 +189,10 @@ export type Store = {
   /** reusable prompt snippets (prompt library) */
   prompts: Prompt[]
   paletteOpen: boolean
-  /** emacs-style bottom bar: 'chord' = ⌃X pressed, waiting for ⌃F; 'tab' = tab finder */
+  /** emacs-style bottom bar: 'chord' = a chord prefix is pending; 'tab' = tab finder */
   minibuffer: 'chord' | 'tab' | null
+  /** the chord echo ("C-x -") or the finder's prompt ("Find tab:", ":b") */
+  miniText: string
   agentWizard: AgentWizardCtx | null
   /** which docked side panel is open (roster / prompts / checkpoints), if any */
   openPanel: SidePanel | null
@@ -294,7 +296,7 @@ export type Store = {
 
   // ----- command palette -----
   setPaletteOpen: (open: boolean) => void
-  setMinibuffer: (m: 'chord' | 'tab' | null) => void
+  setMinibuffer: (m: 'chord' | 'tab' | null, text?: string) => void
 
   // ----- side panels / search -----
   setOpenPanel: (p: SidePanel | null) => void
@@ -355,6 +357,7 @@ export const useStore = create<Store>((set, get) => ({
   prompts: loadPrompts(),
   paletteOpen: false,
   minibuffer: null,
+  miniText: '',
   agentWizard: null,
   openPanel: null,
   searchOpen: false,
@@ -1302,7 +1305,7 @@ export const useStore = create<Store>((set, get) => ({
 
   // ---------- command palette ----------
   setPaletteOpen: (open) => set({ paletteOpen: open }),
-  setMinibuffer: (m) => set({ minibuffer: m }),
+  setMinibuffer: (m, text = '') => set({ minibuffer: m, miniText: text }),
 
   // ---------- side panels / search ----------
   setOpenPanel: (p) => set({ openPanel: p }),

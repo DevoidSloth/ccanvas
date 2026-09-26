@@ -46,9 +46,14 @@ fn install_menu(app: &tauri::App) -> tauri::Result<()> {
     let mut menu = MenuBuilder::new(app);
     if cfg!(target_os = "macos") {
         let name = app.package_info().name.clone();
+        let settings = MenuItemBuilder::with_id("open-settings", "Settings…")
+            .accelerator("CmdOrCtrl+,")
+            .build(app)?;
         menu = menu.item(
             &SubmenuBuilder::new(app, name)
                 .about(None)
+                .separator()
+                .item(&settings)
                 .separator()
                 .services()
                 .separator()
@@ -90,6 +95,8 @@ fn install_menu(app: &tauri::App) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         if event.id() == "close-widget" {
             let _ = app.emit("menu:close-widget", ());
+        } else if event.id() == "open-settings" {
+            let _ = app.emit("menu:open-settings", ());
         }
     });
     Ok(())

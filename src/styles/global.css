@@ -30,17 +30,17 @@
   /* accent — Claude clay (live things: selection, active tool, working LEDs) */
   --accent: #d97757;
   --accent-bright: #e5906f;
-  --accent-soft: rgba(217, 119, 87, 0.13);
-  --accent-line: rgba(217, 119, 87, 0.42);
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 42%, transparent);
 
   /* LED states */
   --led-idle: #7fb58a;
-  --led-working: #d97757;
+  --led-working: var(--accent);
   --led-waiting: #e3b35c;
   --led-done: #a78bfa;
 
   /* widget kind accents */
-  --k-terminal: #d97757;
+  --k-terminal: var(--accent);
   --k-web: #7ea6c2;
   --k-note: #d4b27a;
 
@@ -58,8 +58,8 @@
   --ft-file: #8a867d;
 
   /* grid — fine dots plus sparse registration crosses */
-  --grid-dot: rgba(250, 249, 245, 0.06);
-  --grid-dot-strong: rgba(250, 249, 245, 0.1);
+  --grid-dot: color-mix(in srgb, var(--ink) 6%, transparent);
+  --grid-dot-strong: color-mix(in srgb, var(--ink) 10%, transparent);
 
   /* fx */
   --shadow-widget: 0 22px 48px -20px rgba(0, 0, 0, 0.75),
@@ -79,6 +79,100 @@
   --r-lg: 12px;
 
   --topbar-h: 38px;
+}
+
+/* ---------- colour palettes (Settings → Colour palette) ----------
+   Claude is the :root default above; each alternative re-points the surface,
+   line, ink and accent tokens. Everything else derives from these. */
+:root[data-palette='ember'] {
+  --bg: #1d1a19;
+  --bg-grad-a: #221e1c;
+  --bg-grad-b: #181514;
+  --panel: #272220;
+  --panel-2: #2c2624;
+  --panel-hi: #362f2c;
+  --raised: #312a27;
+  --line: #3f3632;
+  --line-soft: #312a27;
+  --line-hard: #52463f;
+  --ink: #fbf3ec;
+  --ink-dim: #cbbdb2;
+  --ink-faint: #958379;
+  --ink-ghost: #5f524b;
+  --accent: #e8845c;
+  --accent-bright: #f29c77;
+}
+:root[data-palette='moss'] {
+  --bg: #1a1d1a;
+  --bg-grad-a: #1e221e;
+  --bg-grad-b: #161916;
+  --panel: #212621;
+  --panel-2: #252b25;
+  --panel-hi: #2d342d;
+  --raised: #293029;
+  --line: #354035;
+  --line-soft: #2a322a;
+  --line-hard: #465246;
+  --ink: #f2f5ee;
+  --ink-dim: #bcc4b6;
+  --ink-faint: #858f7f;
+  --ink-ghost: #535c4f;
+  --accent: #8fbf7f;
+  --accent-bright: #a8d398;
+}
+:root[data-palette='slate'] {
+  --bg: #191c20;
+  --bg-grad-a: #1d2025;
+  --bg-grad-b: #15181b;
+  --panel: #20242a;
+  --panel-2: #242930;
+  --panel-hi: #2c323a;
+  --raised: #282d34;
+  --line: #343b45;
+  --line-soft: #29303a;
+  --line-hard: #454e5a;
+  --ink: #eef2f7;
+  --ink-dim: #b7c0cc;
+  --ink-faint: #808a97;
+  --ink-ghost: #4f5763;
+  --accent: #7aa7d9;
+  --accent-bright: #97bde6;
+}
+:root[data-palette='plum'] {
+  --bg: #1d1a1f;
+  --bg-grad-a: #221e24;
+  --bg-grad-b: #18161a;
+  --panel: #262129;
+  --panel-2: #2b252e;
+  --panel-hi: #342d38;
+  --raised: #2f2933;
+  --line: #3e3542;
+  --line-soft: #302934;
+  --line-hard: #504555;
+  --ink: #f6f0f8;
+  --ink-dim: #c6bccb;
+  --ink-faint: #8f8494;
+  --ink-ghost: #5c5260;
+  --accent: #b98ad8;
+  --accent-bright: #cba4e5;
+}
+:root[data-palette='mono'] {
+  --bg: #1c1c1c;
+  --bg-grad-a: #202020;
+  --bg-grad-b: #181818;
+  --panel: #242424;
+  --panel-2: #282828;
+  --panel-hi: #313131;
+  --raised: #2c2c2c;
+  --line: #3a3a3a;
+  --line-soft: #2e2e2e;
+  --line-hard: #4a4a4a;
+  --ink: #f4f4f4;
+  --ink-dim: #c0c0c0;
+  --ink-faint: #8a8a8a;
+  --ink-ghost: #575757;
+  --accent: #c9c9c9;
+  --accent-bright: #e0e0e0;
 }
 
 * {
@@ -247,7 +341,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 1;
+  /* tabs compress first; the chip keeps its (capped) name until it goes icon-only */
+  flex-shrink: 0;
   min-width: 0;
   background: transparent;
   border: 1px solid transparent;
@@ -394,7 +489,7 @@ textarea {
   top: calc(100% + 8px);
   right: 0;
   width: 250px;
-  background: rgba(38, 38, 36, 0.97);
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -457,6 +552,14 @@ textarea {
 }
 
 /* ---------- tabs (inline in the top bar) ---------- */
+/* strip + the new-tab button, which stays put while the strip scrolls */
+.tabs-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex-shrink: 1;
+}
 .tabs {
   display: flex;
   align-items: center;
@@ -465,9 +568,25 @@ textarea {
   flex-shrink: 1;
   overflow-x: auto;
   overflow-y: hidden;
+  /* the global `* { scrollbar-width }` rule would otherwise bring a bar back */
+  scrollbar-width: none;
 }
 .tabs::-webkit-scrollbar {
+  display: none;
   height: 0;
+}
+/* overflowing: fade the edge(s) that have more tabs past them */
+.tabs--fade-r {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+.tabs--fade-l {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+}
+.tabs--fade-l.tabs--fade-r {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
 }
 
 .tab {
@@ -485,8 +604,15 @@ textarea {
   font-size: 12px;
   font-weight: 500;
   position: relative;
-  flex-shrink: 0;
+  /* squeeze toward min-width before the strip has to scroll */
+  flex-shrink: 1;
   transition: color 0.13s ease, background 0.13s ease;
+}
+.tab:not(.tab--pinned) {
+  min-width: 76px;
+}
+.tab--active {
+  flex-shrink: 0;
 }
 .tab {
   user-select: none;
@@ -556,6 +682,7 @@ textarea {
 }
 /* pinned: compact, pin glyph instead of a close button, divider after the group */
 .tab--pinned {
+  flex-shrink: 0;
   max-width: 120px;
   padding: 0 9px 0 7px;
   gap: 4px;
@@ -712,7 +839,7 @@ body.is-panning * {
   height: 15px;
   background: radial-gradient(circle, var(--accent-bright) 0 3px, #151413 3.5px);
   border: 2px solid var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft), 0 0 12px rgba(217, 119, 87, 0.45);
+  box-shadow: 0 0 0 4px var(--accent-soft), 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* draggable handles on a selected connector */
@@ -1042,7 +1169,7 @@ body.is-panning * {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--ink-faint);
-  background: rgba(31, 30, 29, 0.82);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
   border: 1px solid var(--line);
   border-radius: 100px;
   padding: 3px 10px;
@@ -2353,7 +2480,7 @@ body.is-panning * {
   align-items: center;
   gap: 2px;
   padding: 3px;
-  background: rgba(38, 38, 36, 0.82);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line-soft);
@@ -2500,7 +2627,7 @@ body.is-panning * {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  background: rgba(38, 38, 36, 0.86);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -2579,7 +2706,7 @@ body.is-panning * {
   width: 290px;
   height: 36px;
   padding: 0 13px;
-  background: rgba(38, 38, 36, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--accent-line);
@@ -2600,7 +2727,7 @@ body.is-panning * {
   padding-left: 4px;
 }
 .quick-insert__menu {
-  background: rgba(38, 38, 36, 0.96);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -2651,7 +2778,7 @@ body.is-panning * {
   align-items: center;
   gap: 1px;
   padding: 3px;
-  background: rgba(38, 38, 36, 0.82);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line-soft);
@@ -2714,7 +2841,7 @@ body.is-panning * {
   padding: 4px;
   display: flex;
   flex-direction: column;
-  background: rgba(38, 38, 36, 0.96);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--line);
@@ -3401,7 +3528,7 @@ body.is-panning * {
   align-items: center;
   gap: 3px;
   padding: 5px 7px;
-  background: rgba(38, 38, 36, 0.92);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -3602,7 +3729,7 @@ body.is-panning * {
 .palette {
   width: 560px;
   max-width: calc(100vw - 40px);
-  background: rgba(38, 38, 36, 0.97);
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   border: 1px solid var(--line-hard);
@@ -3710,7 +3837,7 @@ body.is-panning * {
   position: absolute;
   bottom: 50px;
   right: 12px;
-  background: rgba(38, 38, 36, 0.82);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line-soft);
@@ -3722,7 +3849,7 @@ body.is-panning * {
 .minimap__canvas {
   position: relative;
   cursor: pointer;
-  background: rgba(31, 30, 29, 0.6);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
 }
 .minimap__el {
   position: absolute;
@@ -3841,7 +3968,7 @@ body.is-panning * {
   display: flex;
   gap: 3px;
   padding: 6px;
-  background: rgba(38, 38, 36, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -3857,7 +3984,7 @@ body.is-panning * {
   transform: translateX(-50%) rotate(45deg);
   width: 9px;
   height: 9px;
-  background: rgba(38, 38, 36, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -3884,7 +4011,7 @@ body.is-panning * {
   flex-direction: column;
   gap: 7px;
   padding: 18px;
-  background: rgba(38, 38, 36, 0.98);
+  background: color-mix(in srgb, var(--panel) 98%, transparent);
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   border: 1px solid var(--line-hard);
@@ -4271,7 +4398,7 @@ body.is-panning * {
   max-height: 220px;
   overflow: auto;
   padding: 4px;
-  background: rgba(38, 38, 36, 0.97);
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid var(--line-hard);
@@ -4529,7 +4656,7 @@ body.is-panning * {
   gap: 7px;
   height: 24px;
   padding: 0 9px;
-  background: rgba(217, 119, 87, 0.16);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   border: 1px solid var(--accent-line);
   border-radius: 100px;
   color: var(--accent-bright);
@@ -4550,7 +4677,7 @@ body.is-panning * {
   flex-direction: column;
   gap: 2px;
   padding: 5px;
-  background: rgba(38, 38, 36, 0.92);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -4611,7 +4738,7 @@ body.is-panning * {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  background: rgba(38, 38, 36, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--line);
@@ -5035,11 +5162,24 @@ body.is-panning * {
   width: min(332px, calc(100vw - 28px));
 }
 
+/* top bar, narrow windows: the folder chip goes icon-only, then the panel
+   buttons fold into the ⋯ menu (.tb-more) — nothing becomes unreachable */
+.topbar__tools .tb-more {
+  display: none;
+}
 @media (max-width: 1000px) {
-  .tb-chip__name {
-    max-width: 90px;
+  .tb-chip {
+    max-width: 130px;
   }
   .usage__reset {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .tb-chip {
+    padding: 0 6px;
+  }
+  .tb-chip__name {
     display: none;
   }
 }
@@ -5047,8 +5187,11 @@ body.is-panning * {
   .minimap {
     display: none;
   }
-  .topbar__tools .tb-icon:not(:first-child) {
+  .topbar__tools .tb-icon:not(:first-child):not(.tb-more) {
     display: none;
+  }
+  .topbar__tools .tb-more {
+    display: grid;
   }
 }
 @media (max-height: 620px) {
@@ -5057,7 +5200,6 @@ body.is-panning * {
   }
 }
 @media (max-width: 680px) {
-  .tb-chip__name,
   .usage {
     display: none;
   }
@@ -5086,8 +5228,11 @@ body.is-panning * {
   .toolbar .tool {
     display: none;
   }
-  .topbar__tools {
+  .topbar__tools .tb-icon:not(.tb-more) {
     display: none;
+  }
+  .tab:not(.tab--pinned) {
+    min-width: 60px;
   }
 }
 

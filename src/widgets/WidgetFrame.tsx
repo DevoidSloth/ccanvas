@@ -113,7 +113,9 @@ export function WidgetFrame({
 
   const active = activeWidgetId === el.id
   const Icon = KIND_ICON[el.kind]
-  const accent = el.color ?? WIDGET_ACCENT[el.kind]
+  // untagged terminals/agents follow the palette's accent
+  const accent =
+    el.color ?? (el.kind === 'terminal' || el.kind === 'agent' ? 'var(--accent)' : WIDGET_ACCENT[el.kind])
   // terminals/agents are live — interact on a single click, drag by the title bar
   const isTerminal = el.kind === 'terminal' || el.kind === 'agent'
   // a user-chosen colour tints the whole faceplate so it reads when zoomed out

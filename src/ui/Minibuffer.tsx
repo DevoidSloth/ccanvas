@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store/workspace'
+import { useSettings } from '../lib/settings'
 
-// Emacs-style bottom bar. ⌃X shows the pending chord ("C-x -"); ⌃X ⌃F opens the
-// tab finder: type part of a tab's name, Tab completes to the common prefix
-// (and cycles the candidates once it can't go further), Enter jumps to it,
-// Esc / ⌃G cancels.
+// Emacs-style bottom bar. A chord prefix shows as pending ("C-x -"); the finder
+// shortcut (⌃X ⌃F, vim's `:`, or a custom one — see Settings) opens the tab
+// finder: type part of a tab's name, Tab completes to the common prefix (and
+// cycles the candidates once it can't go further), Enter jumps to it, Esc / ⌃G
+// cancels. ⌃N/⌃P (and ⌃J/⌃K with vim keys on) move through the candidates.
 
 /** Prefix matches first, then substring matches; both case-insensitive. */
 function rank<T extends { name: string }>(tabs: T[], query: string): T[] {
@@ -28,10 +30,11 @@ function commonPrefix(names: string[]): string {
 
 export function Minibuffer() {
   const mode = useStore((s) => s.minibuffer)
+  const text = useStore((s) => s.miniText)
   if (mode === 'chord')
     return (
       <div className="mini">
-        <span className="mini__echo">C-x -</span>
+        <span className="mini__echo">{text}</span>
       </div>
     )
   if (mode === 'tab') return <TabFinder />
@@ -43,6 +46,8 @@ function TabFinder() {
   const activeTabId = useStore((s) => s.activeTabId)
   const switchTab = useStore((s) => s.switchTab)
   const setMinibuffer = useStore((s) => s.setMinibuffer)
+  const prompt = useStore((s) => s.miniText) || 'Find tab:'
+  const vim = useSettings((s) => s.vimKeys)
   const [text, setText] = useState('')
   const [index, setIndex] = useState(0)
   const prevFocus = useRef<HTMLElement | null>(null)
@@ -94,16 +99,16 @@ function TabFinder() {
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation()
     const ctrl = e.ctrlKey && !e.metaKey
-    if (e.key === 'Escape' || (ctrl && e.code === 'KeyG')) {
+    if (e.key === 'Escape' || (ctrl && (e.code === 'KeyG' || (vim && e.code === 'BracketLeft')))) {
       e.preventDefault()
       cancel()
     } else if (e.key === 'Tab') {
       e.preventDefault()
       complete()
-    } else if (e.key === 'ArrowDown' || (ctrl && e.code === 'KeyN')) {
+    } else if (e.key === 'ArrowDown' || (ctrl && (e.code === 'KeyN' || (vim && e.code === 'KeyJ')))) {
       e.preventDefault()
       if (shown.length) setIndex((active + 1) % shown.length)
-    } else if (e.key === 'ArrowUp' || (ctrl && e.code === 'KeyP')) {
+    } else if (e.key === 'ArrowUp' || (ctrl && (e.code === 'KeyP' || (vim && e.code === 'KeyK')))) {
       e.preventDefault()
       if (shown.length) setIndex((active - 1 + shown.length) % shown.length)
     } else if (e.key === 'Enter') {
@@ -136,7 +141,7 @@ function TabFinder() {
         </div>
       )}
       <div className="mini__row">
-        <span className="mini__prompt">Find tab:</span>
+        <span className="mini__prompt">{prompt}</span>
         <input
           ref={inputRef}
           className="mini__input"
