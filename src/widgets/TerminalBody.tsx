@@ -421,6 +421,23 @@ export function TerminalBody({
       const s = stripAnsi(tail)
       return /[╭╮╰╯┌┐└┘│─]/.test(s) || /\? for shortcuts/i.test(s)
     }
+    // Is the program asking you something right now? Judged from the rendered
+    // screen, not the output stream: the stream still holds text that has since
+    // been redrawn away (your typed prompt, an answered permission dialog), and
+    // a Claude reply ending "Do you want me to…?" leaves it idle at its input
+    // box, not blocked. In Claude's UI only an open dialog counts — a numbered
+    // choice menu (❯ 1. Yes) or the "Esc to cancel" footer every dialog has;
+    // anywhere else, a y/n-style question on the last few lines.
+    const looksWaiting = () => {
+      const b = term.buffer.active
+      const lines: string[] = []
+      for (let y = b.baseY; y < b.baseY + term.rows; y++)
+        lines.push(b.getLine(y)?.translateToString(true) ?? '')
+      const screen = lines.join('\n')
+      if (/[╭╮╰╯┌┐└┘│─]/.test(screen) || /\? for shortcuts/i.test(screen))
+        return /❯\s*\d+\./.test(screen) || /esc to cancel/i.test(screen)
+      return looksLikePrompt(lines.filter((l) => l.trim()).slice(-3).join('\n'))
+    }
     const becomeReady = () => {
       if (ready) return
       ready = true
@@ -436,7 +453,7 @@ export function TerminalBody({
       if (!isAgent || modeRef.current !== 'pty') return
       if (!ready) {
         // wait until Claude's UI is up and it isn't mid-question (trust/permission)
-        if (!looksLikeClaude() || looksLikePrompt(tail)) return
+        if (!looksLikeClaude() || looksWaiting()) return
         becomeReady()
         return
       }
@@ -489,7 +506,7 @@ export function TerminalBody({
       wasWorking = true
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = setTimeout(() => {
-        const waiting = looksLikePrompt(tail)
+        const waiting = looksWaiting()
         setAgentStatus(el.id, waiting ? 'waiting' : 'idle')
         // surface the last meaningful line for the agent roster and the
         // zoomed-out terminal card
