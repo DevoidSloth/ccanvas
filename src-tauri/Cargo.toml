@@ -28,3 +28,6 @@ portable-pty = "0.9"
 notify = "6"
 base64 = "0.22"
 plist = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

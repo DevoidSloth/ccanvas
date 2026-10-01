@@ -27,6 +27,7 @@ import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
 import { useTerminalFileDrop } from './lib/fileDrop'
 import { SettingsPanel } from './ui/SettingsPanel'
+import { inEmacs } from './lib/terminal'
 import {
   useSettings,
   activeBindings,
@@ -118,6 +119,7 @@ export default function App() {
   // plus any custom ones. Capture phase so modifier chords work from inside a
   // terminal too (the prefix is swallowed there); bare keys only fire outside
   // text fields and terminals. Any key that doesn't continue a chord cancels it.
+  // A focused terminal running emacs keeps every key: ⌃X ⌃F is emacs's there.
   useEffect(() => {
     let timer: number | undefined
     let pending: Binding[] = []
@@ -150,7 +152,7 @@ export default function App() {
         if (done) run(done)
         return
       }
-      if (store.minibuffer) return
+      if (store.minibuffer || inEmacs(e.target)) return
       const editing = isEditableTarget(e.target)
       const hits = activeBindings(useSettings.getState()).filter(
         (b) => matches(b.seq[0], e) && (hasModifier(b.seq[0]) || !editing),

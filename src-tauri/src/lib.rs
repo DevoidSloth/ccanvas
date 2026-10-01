@@ -144,6 +144,7 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_detach,
+            pty::pty_foreground,
             pty::pty_kill,
             term_profile::terminal_profile,
             quit_app,

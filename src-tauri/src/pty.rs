@@ -295,6 +295,43 @@ pub fn pty_detach(state: State<'_, PtyManager>, id: String) {
     }
 }
 
+/// Name of the program in the foreground of the session's terminal (e.g.
+/// `zsh`, `emacs-30.1`, `claude`), or None when it can't be told. The frontend
+/// polls this for the focused terminal so its key handlers can stand down for
+/// programs that own those keys, like emacs and its ⌃X prefix.
+#[tauri::command]
+pub fn pty_foreground(state: State<'_, PtyManager>, id: String) -> Option<String> {
+    #[cfg(unix)]
+    {
+        let pid = state
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)?
+            .master
+            .process_group_leader()?;
+        process_name(pid)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (state, id);
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn process_name(pid: libc::pid_t) -> Option<String> {
+    let mut buf = [0u8; 256];
+    let n = unsafe { libc::proc_name(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n as usize]).into_owned())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn process_name(pid: libc::pid_t) -> Option<String> {
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(comm.trim_end().to_string())
+}
+
 /// Tear the shell down for good. Called when the widget is actually deleted.
 #[tauri::command]
 pub fn pty_kill(state: State<'_, PtyManager>, id: String) {
