@@ -11,7 +11,6 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-e5e0d8?style=flat-square&labelColor=1f1e1d)](#quick-start)
 [![License](https://img.shields.io/badge/license-Apache--2.0-e5e0d8?style=flat-square&labelColor=1f1e1d)](LICENSE)
 
-**An infinite canvas for driving Claude Code.**
 *Excalidraw, but the boxes are real terminals, Claude agents, and editors.*
 
 Spawn shells, Claude agents, editors, and VS Code onto a boundless dark
@@ -22,7 +21,12 @@ self-contained `.ccnvs` workspace you can save, reopen, and share.
 
 </div>
 
-![ccanvas: multiple agents, a live editor, a file tree, and notes on one infinite canvas](docs/screenshot.png)
+<p align="center">
+  <img src="docs/screenshot.png" alt="ccanvas 2.0: two Claude agents, an editor, a file tree, a terminal, and a note on one canvas" width="100%" />
+</p>
+<p align="center">
+  <sub>Two Claude agents — one just finished, one mid-build — beside an editor, a file tree, a terminal, and a note.</sub>
+</p>
 
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
 
