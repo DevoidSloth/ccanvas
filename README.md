@@ -4,6 +4,7 @@
 
 <p></p>
 
+[![Release](https://img.shields.io/badge/release-v2.0.0-d97757?style=flat-square&labelColor=1f1e1d)](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.0.0)
 [![Desktop](https://img.shields.io/badge/desktop-Tauri%202-e5e0d8?style=flat-square&labelColor=1f1e1d)](https://tauri.app)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-e5e0d8?style=flat-square&labelColor=1f1e1d)](#stack)
 [![Core](https://img.shields.io/badge/core-Rust-e5e0d8?style=flat-square&labelColor=1f1e1d)](src-tauri)
@@ -11,11 +12,13 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-e5e0d8?style=flat-square&labelColor=1f1e1d)](LICENSE)
 
 **An infinite canvas for driving Claude Code.**
-*Excalidraw, but the boxes are real terminals, agents, and live previews.*
+*Excalidraw, but the boxes are real terminals, Claude agents, and editors.*
 
 Spawn shells, Claude agents, editors, and VS Code onto a boundless dark
 surface, then arrange them the way you'd sketch a whiteboard. Every tab is a
 self-contained `.ccnvs` workspace you can save, reopen, and share.
+
+**[Download ccanvas 2.0.0](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.0.0)** for macOS, Windows, and Linux · [What's new](#whats-new-in-20)
 
 </div>
 
@@ -28,8 +31,8 @@ self-contained `.ccnvs` workspace you can save, reopen, and share.
 A terminal multiplexer gives you panes; ccanvas gives you *space*. Lay out a
 fleet of agents the way you'd sketch them on a whiteboard, watch each one's
 status at a glance, and see how full each one's context is. When the canvas
-gets crowded, the **agent roster**, **canvas search**, and a **tracking
-camera** that orbits an agent's files keep you oriented.
+gets crowded, the **agent roster**, **canvas search**, the **tab finder**, and
+a **tracking camera** that orbits an agent's files keep you oriented.
 
 This branch trims the toolbox down to what actually gets used driving
 Claude day to day — agents, terminals, files, diffs, and editors — and
@@ -37,7 +40,25 @@ spends that space on making each of those sharper: a real VS Code, terminal
 fidelity that matches your own shell, and drag‑and‑drop straight into a
 running agent.
 
-## What's new on this branch
+## What's new in 2.0
+
+| | |
+| --- | --- |
+| ⚡ **Fast with many agents** | Scrolling, typing, switching tabs, and clicking stay responsive with lots of tabs and agents open. Each agent's session transcript is now read a little at a time as it grows, instead of in full every few seconds, and file reads, `git`, and the usage scan no longer hold up the window |
+| ⌨️ **Emacs keeps its keys** | When emacs is running in the focused terminal, shortcuts like `⌃X ⌃F` go to emacs instead of ccanvas |
+| 💬 **A more accurate waiting dot** | An agent shows as waiting only when Claude is actually asking you something, such as a permission prompt or a choice menu, not when a reply merely ends with a question |
+
+**Also new since 1.0**
+
+| | |
+| --- | --- |
+| 🎨 **Settings and colour palettes** | A Settings panel (the gear in the top bar, or `⌘,` on macOS) with six palettes — Claude, Ember, Moss, Slate, Plum, and Mono — and the keys that open the tab finder |
+| 🔎 **Tab finder** | `⌃X ⌃F` opens a bar at the bottom of the window to jump to any tab by name, with Tab completion. Vim keys (`:`, `gt`, `gT`) or a shortcut of your own can be switched on in Settings |
+| 🗂️ **Tabs you can arrange** | Drag tabs to reorder them; a crowded strip squeezes its tabs before it scrolls and keeps the active one in view |
+| 🟣 **A just-finished dot** | An agent's dot turns purple for two minutes after it finishes a turn, in its title bar, the roster, and its zoomed-out card |
+| 📂 **Path autocomplete in the editor** | The editor's file box lists matching files and folders as you type: arrows to move, Tab to complete, Enter to open |
+
+## What this branch adds
 
 | | |
 | --- | --- |
@@ -53,7 +74,30 @@ running agent.
 
 ## Quick start
 
-### Desktop app (recommended): Tauri
+### Download
+
+Prebuilt installers for **2.0.0** are on the
+[release page](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.0.0):
+
+| Platform | File |
+| --- | --- |
+| macOS (Apple silicon and Intel) | `ccanvas_2.0.0_universal.dmg` |
+| Windows | `ccanvas_2.0.0_x64-setup.exe` or `ccanvas_2.0.0_x64_en-US.msi` |
+| Linux | `ccanvas_2.0.0_amd64.AppImage`, `.deb`, or `ccanvas-2.0.0-1.x86_64.rpm` |
+
+**Opening it on macOS:** the app isn't notarized (that needs a paid Apple
+Developer account), so Gatekeeper will flag it as being from an unidentified
+developer the first time you open it. Either right-click `ccanvas.app` →
+*Open* → confirm *Open* in the dialog, or strip the quarantine flag from the
+Terminal:
+
+```bash
+xattr -cr /Applications/ccanvas.app
+```
+
+You only need to do this once per download.
+
+### Build the desktop app (Tauri)
 
 ```bash
 npm install
@@ -66,18 +110,6 @@ The desktop build is the real thing: native folder/file dialogs, native file
 IO, and an **in-process PTY** per terminal, a real shell with no separate server
 and no WebSocket hop. Requires the Rust toolchain (`rustup`) and, on Windows,
 the WebView2 runtime (preinstalled on Windows 11).
-
-**Downloaded a prebuilt macOS release instead of building it?** The app isn't
-notarized (that needs a paid Apple Developer account), so Gatekeeper will
-flag it as being from an unidentified developer the first time you open it.
-Either right-click `ccanvas.app` → *Open* → confirm *Open* in the dialog, or
-strip the quarantine flag from the Terminal:
-
-```bash
-xattr -cr /Applications/ccanvas.app
-```
-
-You only need to do this once per download.
 
 ### Web app
 
@@ -112,25 +144,26 @@ File drag-and-drop needs the desktop app; the VS Code widget works here too.
 
 | Surface | Notes |
 | --- | --- |
-| **Infinite canvas** | Pan (`H` / middle-mouse / two-finger scroll), smooth zoom (⌘/Ctrl-scroll), dot grid, minimap |
-| **Quick insert** | `Space` drops text at the cursor; press `/` then a widget name (`agent` `term` `files` `diff` `editor` `note`) to spawn one |
-| **Command palette** | ⌘/Ctrl-K to spawn widgets, arrange, switch tabs, open panels, insert prompts, export, or jump to a widget |
-| **Widgets** | Claude agent · Terminal · Transcript · File tree · Git panel · Editor (Monaco) · **VS Code** · Markdown note |
+| **Infinite canvas** | Pan by dragging empty canvas, middle-dragging, or scrolling with two fingers; smooth zoom with ⌘/Ctrl-scroll or a pinch; dot grid; minimap (toggle it in the bottom-right controls) |
+| **Quick insert** | `Space` opens a command box at the cursor: type a widget name (`agent` `term` `files` `diff` `editor` `note`), optionally followed by an agent's first prompt, a file path, or a note's text |
+| **Command palette** | ⌘/Ctrl-K to spawn widgets, arrange, switch tabs, open panels, insert prompts, run git, export, or jump to a widget |
+| **Widgets** | Claude agent · Terminal · File tree · Git panel · Editor (Monaco) · **VS Code** · Markdown note, plus the Transcript (right-click an agent) and data, figure, and video viewers that open from the file tree or a path clicked in a terminal |
 | **Drag & drop** | Drop a file from the OS onto a terminal or agent to paste its path in — the way you'd hand Claude a screenshot |
-| **Agent orchestration** | Per-agent activity dot (idle/working/waiting), idle notifications, broadcast-to-many, per-agent model/prompt/flags |
+| **Agent orchestration** | Per-agent status dot (idle, working, waiting, just finished), an *N waiting* inbox, idle notifications, broadcast to many, per-agent model/prompt/flags, and colour labels you can filter the canvas by |
 | **Context meter** | Each agent's bar shows how full its context window is (read from its session transcript), with a one-click **compact** past 70% |
 | **Plan usage** | The top-bar pill shows Claude's own session and weekly limit % with reset times, using your Claude Code sign-in (desktop app); falls back to a local token estimate |
-| **Memory panel** | Claude's cross-session memory for the bound folder, rendered as a graph you can pan, filter by type, and click into |
-| **Agent roster** | Mission-control list of every agent across all tabs: status, cost/turns, last line, click-to-focus, and a composer to message one or broadcast to all |
+| **Memory panel** | Claude's cross-session memory for the bound folder, rendered as a graph you can pan, zoom, and click into |
+| **Agent roster** | Mission-control list of every agent across all tabs: status, cost/turns, latest reply, click-to-focus, and a composer to message one or broadcast to all |
 | **Tracking camera** | Follow an agent and watch every file it touches spawn as a viewer in an **orbit** around it, arrows pointing back; the camera stays framed on the action |
 | **Transcript widget** | An agent's *real* conversation rendered from its session JSONL: clean text + tool chips, free of terminal box-drawing chrome, following the session live |
 | **Checkpoints** | Git-backed working-tree snapshots: save a point before letting an agent loose, restore tracked files if it makes a mess |
 | **Prompt library** | Reusable prompt snippets you can insert into the focused agent, drag onto any agent, or manage; persisted like layout templates |
-| **Canvas search** | ⌘/Ctrl-F to fuzzy-search every element's text (titles, notes, paths, URLs, prompts, queries, frame names) and jump to it |
+| **Canvas search** | ⌘/Ctrl-F to search every element's text (titles, notes, paths, URLs, prompts, frame names) and jump to it |
 | **Follow active agent** | A headless camera mode that pans to whichever agent most recently started working |
-| **Arrange** | Group, lock, align, distribute, tidy, copy/paste/duplicate, z-order, snapping guides, transform handles, minimap |
-| **Right-click menus** | Custom context menus: canvas elements (duplicate, lock, z-order, delete), agents (track, transcript, label box), file-tree rows (open, **reveal in Explorer/Finder**, copy path), empty canvas (paste, select all) |
-| **Tabs** | Multiple `.ccnvs` workspaces open at once, each bound to its own folder |
+| **Settings** | Six colour palettes and the keys that open the tab finder (Emacs on by default; Vim and your own shortcuts are opt-in) |
+| **Arrange** | Group, lock, align, distribute, tidy, copy/paste/duplicate, z-order, snapping guides; arrange terminals by label colour or by folder |
+| **Right-click menus** | Canvas elements (duplicate, copy, lock, group, z-order, delete), agents (track, open transcript, label), file-tree rows (open in the editor or a viewer, open with the default app, **reveal in Explorer/Finder**, copy path), tabs (pin, rename, close), empty canvas (paste, select all, reveal folder) |
+| **Tabs** | Multiple `.ccnvs` workspaces open at once, each bound to its own folder; drag to reorder, pin the ones you keep, jump with the tab finder |
 | **Persistence** | Save/Open into the canvas folder (backend) or File System Access API; reusable widget-layout templates; PNG/SVG export |
 
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
@@ -140,10 +173,10 @@ File drag-and-drop needs the desktop app; the VS Code widget works here too.
 The canvas is great for layout but poor at *"is anything stuck?"*, so these
 three features are the answer at scale:
 
-- **Agent roster** (command palette → *Agent roster*): every agent across every
-  tab in one list, with live status, cost and turn count, and its last line of
-  output. Click a row to fly the camera to that agent; type in the composer to
-  message one agent or broadcast to all.
+- **Agent roster** (the **Agents** button in the top bar, or command palette →
+  *Agent roster*): every agent across every tab in one list, with live status,
+  cost and turn count, and its latest reply. Click a row to fly the camera to
+  that agent; type in the composer to message one agent or broadcast to all.
 - **Tracking camera** (right-click an agent → *Track this agent*): as the agent
   reads and writes files, each one opens as a viewer widget arranged in an orbit
   around it with a dashed arrow pointing back (`read` arrows are labelled). The
@@ -169,31 +202,39 @@ to be a git repo.
 
 ## Keyboard
 
+On macOS the canvas shortcuts use ⌘ only, so Ctrl combinations reach your
+terminal untouched; on Windows and Linux they use Ctrl.
+
 | Key | Action |
 | --- | --- |
-| drag empty canvas / `Shift`-drag | pan · box-select |
-| `Space` | quick-insert text or `/command` widget at the cursor |
+| drag empty canvas / middle-drag / two-finger scroll | pan |
+| `Shift`-drag | box-select |
+| ⌘/Ctrl + scroll, or pinch | zoom to cursor |
+| `Space` | command box at the cursor (`agent`, `term`, `files`, `diff`, `editor`, `note`) |
 | ⌘/Ctrl + `K` | open / close the command palette |
 | ⌘/Ctrl + `F` | search this canvas |
-| drag empty canvas / middle-drag | pan |
-| ⌘/Ctrl + scroll | zoom to cursor |
+| `⌃X ⌃F` | tab finder (Vim `:` / `gt` / `gT` can be switched on in Settings) |
+| ⌘ + `,` | Settings (macOS desktop app) |
 | ⌘/Ctrl + `S` / `O` / `N` | save · open · new canvas |
 | ⌘/Ctrl + `T` / `Shift T` | new terminal · new Claude agent |
 | ⌘/Ctrl + `Shift V` | new VS Code widget for this canvas's folder |
-| hold ⌘/Ctrl | show the jump-number on every terminal |
-| ⌘/Ctrl + `1`–`9` | jump to and focus the Nth terminal |
+| hold ⌘ | show the jump-number on every terminal |
+| ⌘/Ctrl + `1`–`9` | jump to and focus the Nth terminal or agent |
 | ⌘/Ctrl + `Shift ]` / `[` | next · previous terminal |
-| ⌘/Ctrl + `W` | close the focused widget (quits the desktop app when none are left) |
+| ⌘/Ctrl + `Esc` | leave the focused terminal |
+| ⌘/Ctrl + `W` | close the focused widget (desktop app; quits when no tab has a widget left) |
 | ⌘/Ctrl + `Z` / `Shift Z` | undo · redo |
 | ⌘/Ctrl + `C` / `X` / `V` / `D` | copy · cut · paste · duplicate |
 | ⌘/Ctrl + `G` / `Shift G` | group · ungroup |
 | ⌘/Ctrl + `L` | lock / unlock selection |
 | ⌘/Ctrl + `[` / `]` | send to back / bring to front |
 | ⌘/Ctrl + `A` | select all |
-| ⌘/Ctrl + `0` `+` `-` | reset / zoom in / zoom out |
-| `Delete` | delete selection |
-| `Esc` | back to select |
-| double-click | edit text · interact with widget · rename widget/tab |
+| ⌘/Ctrl + `0` `+` `-` | 100% / zoom in / zoom out |
+| `\` | zoom to the selection, or fit everything |
+| `Delete` / `Backspace` | delete selection |
+| `Esc` | clear the selection |
+| click | use a terminal, agent, editor, or other live widget |
+| double-click | rename a widget or tab · edit text |
 
 ## Stack
 
@@ -220,19 +261,25 @@ backend.
   paths in as a bracketed paste.
 - **`src/lib/transcript.ts`**: reads and parses Claude Code session JSONL (last
   turn for flow piping, touched files for the tracking camera, full conversation
-  for the transcript widget).
+  for the transcript widget), and runs one shared poller per agent that feeds
+  its context meter, title sync, and roster entry.
 - **`src/lib/tracker.ts`**: the tracking camera, which polls a transcript, spawns
   satellite viewers in an orbit, and keeps the camera framed.
 - **`src/lib/checkpoints.ts`**: git-backed working-tree checkpoints.
+- **`src/lib/settings.ts`** and **`src/ui/Minibuffer.tsx`**: colour palettes,
+  tab-finder keys, and the tab finder itself.
 - **`src-tauri/`**: the Rust app: `src/pty.rs` (a `portable-pty` shell per widget,
-  streaming `pty:data`/`pty:exit` events), `src/editor.rs` (the VS Code
-  `serve-web` process + local proxy), `src/term_profile.rs` (reads the host
-  terminal's theme), and `src/files.rs` (native dialogs + fs).
+  streaming `pty:data`/`pty:exit` events), `src/transcript.rs` (per-agent
+  transcript summaries that parse only what was appended since the last poll),
+  `src/usage.rs` and `src/plan_usage.rs` (the usage pill), `src/editor.rs` (the
+  VS Code `serve-web` process + local proxy), `src/term_profile.rs` (reads the
+  host terminal's theme), and `src/files.rs` (native dialogs + fs; reads, `git`,
+  and directory listings run off the main thread).
 - **`server/pty-server.mjs`**: the optional web-mode backend (same protocol, over
   `ws`/`http`) for when you run in a plain browser.
 
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
 
 <div align="center">
-<sub>See <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> to hack on it · <a href="LICENSE">LICENSE</a></sub>
+<sub>ccanvas 2.0.0 · See <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> to hack on it · <a href="LICENSE">LICENSE</a></sub>
 </div>
