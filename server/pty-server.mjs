@@ -13,12 +13,14 @@
 //   • GET  /read-bytes? — read a file (base64 bytes)     → { b64 }
 //   • GET  /file?path=  — stream a file with Range support (video/audio)
 //   • POST /save        — write a file  { path, content }
+//   • GET  /code-serve?dir= — start/reuse `code serve-web` for a folder
 //
 // The canvas needs real folders/paths (for terminal cwd + where .ccnvs
 // lives) which a browser sandbox can't provide — so this process does it.
 // ============================================================
 import os from 'node:os'
 import http from 'node:http'
+import net from 'node:net'
 import nodePath from 'node:path'
 import { promises as fs, createReadStream } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
@@ -182,50 +184,52 @@ async function claudeUsage() {
   const now = Date.now()
   const cutoff = now - 25 * 3600_000
   const entries = []
-  let projects
-  try {
-    projects = await fs.readdir(root, { withFileTypes: true })
-  } catch {
-    return empty
-  }
-  for (const proj of projects) {
-    if (!proj.isDirectory()) continue
-    const pdir = nodePath.join(root, proj.name)
-    let files
+  const files = []
+  const walk = async (dir) => {
+    let ents
     try {
-      files = await fs.readdir(pdir, { withFileTypes: true })
+      ents = await fs.readdir(dir, { withFileTypes: true })
     } catch {
-      continue
+      return
     }
-    for (const f of files) {
-      if (!f.isFile() || !f.name.endsWith('.jsonl')) continue
-      const fp = nodePath.join(pdir, f.name)
-      try {
-        const st = await fs.stat(fp)
-        if (st.mtimeMs < cutoff) continue
-        const content = await fs.readFile(fp, 'utf8')
-        for (const line of content.split('\n')) {
-          if (!line.includes('"usage"')) continue
-          let v
-          try {
-            v = JSON.parse(line)
-          } catch {
-            continue
-          }
-          const u = v && v.message && v.message.usage
-          if (!u) continue
-          // new work only — cache *reads* are cheap and re-counted each turn
-          const tok =
-            (u.input_tokens || 0) +
-            (u.output_tokens || 0) +
-            (u.cache_creation_input_tokens || 0)
-          if (!tok) continue
-          const ts = v.timestamp ? Date.parse(v.timestamp) : NaN
-          if (!Number.isNaN(ts) && ts >= cutoff) entries.push([ts, tok])
+    for (const e of ents) {
+      const p = nodePath.join(dir, e.name)
+      if (e.isDirectory()) await walk(p)
+      else if (e.isFile() && e.name.endsWith('.jsonl')) files.push(p)
+    }
+  }
+  await walk(root)
+  // one line per content block repeats the same message id + usage; count once
+  const seen = new Set()
+  for (const fp of files) {
+    try {
+      const st = await fs.stat(fp)
+      if (st.mtimeMs < cutoff) continue
+      const content = await fs.readFile(fp, 'utf8')
+      for (const line of content.split('\n')) {
+        if (!line.includes('"usage"')) continue
+        let v
+        try {
+          v = JSON.parse(line)
+        } catch {
+          continue
         }
-      } catch {
-        /* skip unreadable file */
+        const u = v && v.message && v.message.usage
+        if (!u) continue
+        if (v.message.id) {
+          const key = `${v.message.id}:${v.requestId || ''}`
+          if (seen.has(key)) continue
+          seen.add(key)
+        }
+        // new work only — cache *reads* are cheap and re-counted each turn
+        const tok =
+          (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0)
+        if (!tok) continue
+        const ts = v.timestamp ? Date.parse(v.timestamp) : NaN
+        if (!Number.isNaN(ts) && ts >= cutoff) entries.push([ts, tok])
       }
+    } catch {
+      /* skip unreadable file */
     }
   }
   if (!entries.length) return empty
@@ -233,13 +237,15 @@ async function claudeUsage() {
   const FIVE_H = 5 * 3600_000
   const dayCut = now - 24 * 3600_000
   const dayTokens = entries.filter((e) => e[0] >= dayCut).reduce((s, e) => s + e[1], 0)
-  let bStart = entries[0][0]
+  // blocks begin on the hour of their first message
+  const floorHour = (ts) => ts - (ts % 3600_000)
+  let bStart = floorHour(entries[0][0])
   let bTok = 0
   let bMsg = 0
   let prev = entries[0][0]
   for (const [ts, tok] of entries) {
     if (ts - bStart >= FIVE_H || ts - prev > FIVE_H) {
-      bStart = ts
+      bStart = floorHour(ts)
       bTok = 0
       bMsg = 0
     }
@@ -475,6 +481,158 @@ function transcodeFile(req, res, p, start) {
   res.on('close', kill)
 }
 
+// ---------- VS Code web servers (one per folder) ----------
+const codeServers = new Map()
+
+function portFree() {
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer()
+    srv.listen(0, HOST, () => {
+      const { port } = srv.address()
+      srv.close(() => resolve(port))
+    })
+    srv.on('error', reject)
+  })
+}
+
+function listening(port) {
+  return new Promise((resolve) => {
+    const req = http.request({ host: HOST, port, path: '/', method: 'HEAD', timeout: 400 }, () => {
+      req.destroy()
+      resolve(true)
+    })
+    req.on('error', () => resolve(false))
+    req.on('timeout', () => {
+      req.destroy()
+      resolve(false)
+    })
+    req.end()
+  })
+}
+
+// `code serve-web` refuses to be framed (X-Frame-Options + frame-ancestors),
+// which renders as a blank widget, so the widget loads a small proxy that
+// strips those headers and re-attaches VS Code's SameSite=Strict secret cookie.
+const SECRET_COOKIE = 'vscode-cli-secret-half'
+
+// Settings defaults for the embedded workbench so it matches the dark canvas —
+// only defaults, a theme picked inside VS Code still wins.
+const WORKBENCH_DEFAULTS = '&quot;configurationDefaults&quot;:{&quot;workbench.colorTheme&quot;:&quot;Dark 2026&quot;},'
+const WORKBENCH_CONFIG = 'id="vscode-workbench-web-configuration" data-settings="{'
+const withDefaults = (html) => html.replace(WORKBENCH_CONFIG, WORKBENCH_CONFIG + WORKBENCH_DEFAULTS)
+
+function codeProxy(upstream) {
+  let secret = null
+  const withSecret = (headers) => {
+    if (!secret) return headers
+    const cookie = headers.cookie
+    if (!cookie) headers.cookie = secret
+    else if (!cookie.includes(SECRET_COOKIE)) headers.cookie = `${cookie}; ${secret}`
+    return headers
+  }
+  const srv = http.createServer((req, res) => {
+    const up = http.request(
+      { host: HOST, port: upstream, path: req.url, method: req.method, headers: withSecret({ ...req.headers }) },
+      (ur) => {
+        for (let i = 0; i < ur.rawHeaders.length; i += 2) {
+          const name = ur.rawHeaders[i].toLowerCase()
+          const value = ur.rawHeaders[i + 1]
+          if (name === 'x-frame-options') continue
+          if (name === 'content-security-policy' && value.includes('frame-ancestors')) continue
+          if (name === 'set-cookie' && value.startsWith(SECRET_COOKIE)) secret = value.split(';')[0]
+          const prev = res.getHeader(name)
+          res.setHeader(name, prev == null ? value : [].concat(prev, value))
+        }
+        const page = req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))
+        if (!page) {
+          res.writeHead(ur.statusCode ?? 502)
+          ur.pipe(res)
+          return
+        }
+        const chunks = []
+        ur.on('data', (c) => chunks.push(c))
+        ur.on('end', () => {
+          const html = withDefaults(Buffer.concat(chunks).toString('utf8'))
+          res.removeHeader('transfer-encoding')
+          res.setHeader('content-length', Buffer.byteLength(html))
+          res.writeHead(ur.statusCode ?? 502)
+          res.end(html)
+        })
+      },
+    )
+    up.on('error', () => res.destroy())
+    req.pipe(up)
+  })
+  srv.on('upgrade', (req, socket, head) => {
+    const up = net.connect(upstream, HOST, () => {
+      const headers = withSecret({ ...req.headers })
+      let raw = `${req.method} ${req.url} HTTP/1.1\r\n`
+      for (const [k, v] of Object.entries(headers)) raw += `${k}: ${v}\r\n`
+      up.write(raw + '\r\n')
+      if (head.length) up.write(head)
+      up.pipe(socket)
+      socket.pipe(up)
+    })
+    const close = () => { up.destroy(); socket.destroy() }
+    up.on('error', close)
+    socket.on('error', close)
+  })
+  return new Promise((resolve, reject) => {
+    srv.listen(0, HOST, () => resolve({ srv, port: srv.address().port }))
+    srv.on('error', reject)
+  })
+}
+
+// `code` is a shell script → CLI → node; kill the whole process group
+function killServer(s) {
+  try { process.kill(-s.child.pid, 'SIGTERM') } catch { try { s.child.kill() } catch { /* gone */ } }
+  s.proxy?.close()
+}
+
+async function codeServe(dir) {
+  const existing = codeServers.get(dir)
+  if (existing) {
+    if (existing.child.exitCode == null && (await listening(existing.upstream)))
+      return { url: codeUrl(existing.port, dir), port: existing.port, started: false }
+    killServer(existing)
+    codeServers.delete(dir)
+  }
+
+  const upstream = await portFree()
+  const child = spawn(
+    'code',
+    [
+      'serve-web',
+      '--host', HOST,
+      '--port', String(upstream),
+      '--without-connection-token',
+      '--accept-server-license-terms',
+    ],
+    { cwd: dir, stdio: 'ignore', shell: true, detached: true },
+  )
+  let exited = null
+  child.on('exit', (code) => {
+    exited = code
+  })
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    if (exited != null) throw new Error(`code serve-web exited (${exited})`)
+    if (await listening(upstream)) {
+      const { srv, port } = await codeProxy(upstream)
+      codeServers.set(dir, { upstream, port, proxy: srv, child })
+      return { url: codeUrl(port, dir), port, started: true }
+    }
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  killServer({ child })
+  throw new Error("code serve-web didn't start listening in time")
+}
+
+const codeUrl = (port, dir) => `http://${HOST}:${port}/?folder=${encodeURIComponent(dir)}`
+
+process.on('exit', () => codeServers.forEach(killServer))
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0))
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
@@ -619,6 +777,25 @@ const server = http.createServer(async (req, res) => {
           )
         })
         return send(res, 200, out)
+      }
+      // VS Code widget: one `code serve-web` per folder, reused while alive.
+      case '/code-serve': {
+        const dir = url.searchParams.get('dir') || ''
+        if (!dir) return send(res, 400, { error: 'missing dir' })
+        try {
+          return send(res, 200, await codeServe(dir))
+        } catch (err) {
+          return send(res, 500, { error: String(err?.message ?? err) })
+        }
+      }
+      case '/code-stop': {
+        const dir = url.searchParams.get('dir') || ''
+        const s = codeServers.get(dir)
+        if (s) {
+          killServer(s)
+          codeServers.delete(dir)
+        }
+        return send(res, 200, { ok: true })
       }
       case '/save': {
         if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })

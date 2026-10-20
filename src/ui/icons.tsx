@@ -255,6 +255,13 @@ export const IconLock = (p: P) => (
   </S>
 )
 
+export const IconTag = (p: P) => (
+  <S {...p}>
+    <path d="M4 4h7.2L20 12.8 12.8 20 4 11.2z" />
+    <circle cx="8.3" cy="8.3" r="1.2" />
+  </S>
+)
+
 export const IconUnlock = (p: P) => (
   <S {...p}>
     <rect x="5" y="10.5" width="14" height="9" rx="1.5" />
@@ -374,8 +381,16 @@ export const IconDatabase = (p: P) => (
 
 export const IconSettings = (p: P) => (
   <S {...p}>
-    <circle cx="12" cy="12" r="3" />
-    <path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3" />
+    <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+    <circle cx="15" cy="7" r="2" />
+    <circle cx="9" cy="17" r="2" />
+  </S>
+)
+export const IconMore = (p: P) => (
+  <S {...p}>
+    <circle cx="5.5" cy="12" r="0.9" fill="currentColor" />
+    <circle cx="12" cy="12" r="0.9" fill="currentColor" />
+    <circle cx="18.5" cy="12" r="0.9" fill="currentColor" />
   </S>
 )
 
@@ -454,20 +469,40 @@ export const IconMark = (p: P) => (
     style={{ display: 'block' }}
     className={p.className}
   >
-    <circle
-      cx="12"
-      cy="12"
-      r="8"
-      stroke="currentColor"
-      strokeWidth="2"
-      fill="none"
-    />
-    <circle cx="12" cy="12" r="2.2" fill="currentColor" />
+    {/* a canvas of three panes: the clay one is the live Claude terminal
+        (same layout as src-tauri/icons/source/ccanvas.svg, without the plate) */}
+    <rect x="2.5" y="2.5" width="11.5" height="11.5" rx="2.6" fill="var(--accent, #d97757)" />
     <path
-      d="M12 4v3M12 17v3M4 12h3M17 12h3"
-      stroke="currentColor"
-      strokeWidth="2"
+      d="M5.6 6.1l2.8 2.15-2.8 2.15M9.7 10.45h1.9"
+      stroke="var(--bg, #1f1e1d)"
+      strokeWidth="1.6"
       strokeLinecap="round"
+      strokeLinejoin="round"
     />
+    <rect x="16.75" y="3.25" width="4" height="10" rx="1.5" stroke="var(--ink-dim, #c2c0b6)" strokeWidth="1.5" />
+    <rect x="3.25" y="16.75" width="17.5" height="4" rx="1.5" stroke="var(--ink-dim, #c2c0b6)" strokeWidth="1.5" />
   </svg>
+)
+
+// Folded map — the minimap toggle.
+export const IconMap = (p: P) => (
+  <S {...p}>
+    <path d="M9 4.5L3.5 6.5v13L9 17.5l6 2 5.5-2v-13L15 6.5l-6-2z" />
+    <path d="M9 4.5v13M15 6.5v13" />
+  </S>
+)
+
+// Push pin — pinned tabs.
+export const IconPin = (p: P) => (
+  <S {...p}>
+    <path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5z" />
+    <path d="M12 14v6" />
+  </S>
+)
+
+// Angle brackets around a slash — the VS Code widget.
+export const IconVsCode = (p: P) => (
+  <S {...p}>
+    <path d="M8.5 8.5L5 12l3.5 3.5M15.5 8.5L19 12l-3.5 3.5M13.2 6.5l-2.4 11" />
+  </S>
 )

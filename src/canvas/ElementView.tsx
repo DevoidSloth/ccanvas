@@ -54,7 +54,7 @@ function Arrow({ el }: { el: ArrowElement }) {
   // a connector wired with active logic renders in the accent colour with a
   // badge so the graph reads as an orchestration at a glance
   const flowOn = !!el.flow && el.flow.enabled !== false
-  const stroke = flowOn ? '#e8975a' : el.color
+  const stroke = flowOn ? '#d97757' : el.color
   const badge = flowOn ? `${FLOW_GLYPH[el.flow!.when]} ${FLOW_WORD[el.flow!.when]}` : null
   return (
     <g>
@@ -82,10 +82,10 @@ function Arrow({ el }: { el: ArrowElement }) {
           y={badge ? apex.y - 9 : apex.y}
           fill={el.color}
           fontSize={13}
-          fontFamily="'IBM Plex Mono', ui-monospace, monospace"
+          fontFamily="'Spline Sans Mono', ui-monospace, monospace"
           textAnchor="middle"
           dominantBaseline="central"
-          stroke="#0a0b0d"
+          stroke="#1f1e1d"
           strokeWidth={3.5}
           paintOrder="stroke"
         >
@@ -98,10 +98,10 @@ function Arrow({ el }: { el: ArrowElement }) {
           y={el.label ? apex.y + 9 : apex.y}
           fill={stroke}
           fontSize={12}
-          fontFamily="'IBM Plex Mono', ui-monospace, monospace"
+          fontFamily="'Spline Sans Mono', ui-monospace, monospace"
           textAnchor="middle"
           dominantBaseline="central"
-          stroke="#0a0b0d"
+          stroke="#1f1e1d"
           strokeWidth={4}
           paintOrder="stroke"
         >

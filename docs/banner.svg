@@ -1,0 +1,127 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ccanvas 2.0 — an infinite canvas for driving Claude Code">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#211f1d"/>
+      <stop offset="100%" stop-color="#181716"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f6ebe4"/>
+      <stop offset="100%" stop-color="#e3906d"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d97757" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#d97757" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gridFade" cx="74%" cy="50%" r="62%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#ffffff" fill-opacity="0.09"/>
+    </pattern>
+    <mask id="gridMask">
+      <rect width="1200" height="360" fill="url(#gridFade)"/>
+    </mask>
+    <filter id="lift" x="-20%" y="-20%" width="140%" height="170%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <style>
+      .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, "Helvetica Neue", Arial, sans-serif; }
+      .card { fill: #252422; stroke: #ffffff; stroke-opacity: 0.08; }
+      .bar { fill: #2b2a27; }
+      .title { font-size: 10.5px; letter-spacing: 0.9px; fill: #ddd7cf; }
+      .meta { font-size: 10px; fill: #7f7972; }
+      .body { font-size: 11px; fill: #c9c3ba; }
+      .muted { fill: #8a847c; }
+      .accent { fill: #d97757; }
+      @keyframes pulse { 0%,100% { opacity: .45 } 50% { opacity: 1 } }
+      @keyframes blink { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+      .working { animation: pulse 1.6s ease-in-out infinite; }
+      .cursor { animation: blink 1.1s steps(1) infinite; }
+    </style>
+  </defs>
+
+  <!-- surface -->
+  <rect width="1200" height="360" rx="16" fill="url(#bg)"/>
+  <rect width="1200" height="360" rx="16" fill="url(#dots)" mask="url(#gridMask)"/>
+  <circle cx="250" cy="170" r="260" fill="url(#glow)"/>
+  <rect x="0.5" y="0.5" width="1199" height="359" rx="15.5" fill="none" stroke="#ffffff" stroke-opacity="0.09"/>
+
+  <!-- wordmark -->
+  <g transform="translate(64,0)">
+    <rect x="0" y="84" width="64" height="24" rx="12" fill="#d97757" fill-opacity="0.1" stroke="#d97757" stroke-opacity="0.45"/>
+    <text class="mono" x="32" y="100.5" font-size="12" fill="#e8956f" text-anchor="middle">v2.0.0</text>
+    <text class="mono" x="-3" y="182" font-size="66" font-weight="700" letter-spacing="-2.5" fill="url(#word)">ccanvas</text>
+    <text class="sans" x="0" y="224" font-size="21" font-weight="500" fill="#ddd7cf">An infinite canvas for driving Claude Code</text>
+    <text class="sans" x="0" y="254" font-size="15.5" fill="#8d867e">Terminals, Claude agents, and editors on one boundless surface.</text>
+    <text class="mono" x="0" y="298" font-size="12" letter-spacing="0.6" fill="#6f6962">macOS · Windows · Linux</text>
+  </g>
+
+  <!-- agent: just finished -->
+  <g transform="translate(620,44)">
+    <rect class="card" width="280" height="146" rx="10" filter="url(#lift)"/>
+    <path class="bar" d="M10 0 H270 A10 10 0 0 1 280 10 V30 H0 V10 A10 10 0 0 1 10 0 Z"/>
+    <line x1="10" y1="0.75" x2="270" y2="0.75" stroke="#d97757" stroke-opacity="0.75" stroke-width="1.5"/>
+    <text class="mono accent" x="13" y="19.5" font-size="11">✦</text>
+    <circle cx="33" cy="15" r="3.6" fill="#a78bfa"/>
+    <text class="mono title" x="43" y="19">TRANSCRIPT READER</text>
+    <rect x="200" y="13" width="44" height="4" rx="2" fill="#ffffff" fill-opacity="0.1"/>
+    <rect x="200" y="13" width="10" height="4" rx="2" fill="#ddd7cf"/>
+    <text class="mono meta" x="266" y="19" text-anchor="end">23%</text>
+    <text class="mono body" x="14" y="56">– Per-file cache with a byte offset</text>
+    <text class="mono body" x="14" y="76">– Reads only the appended bytes</text>
+    <text class="mono body" x="14" y="96">– Rewrites reset the cache</text>
+    <text class="mono body muted" x="14" y="126">✻ Crunched for 8s · done</text>
+  </g>
+
+  <!-- terminal -->
+  <g transform="translate(924,44)">
+    <rect class="card" width="236" height="146" rx="10" filter="url(#lift)"/>
+    <path class="bar" d="M10 0 H226 A10 10 0 0 1 236 10 V30 H0 V10 A10 10 0 0 1 10 0 Z"/>
+    <line x1="10" y1="0.75" x2="226" y2="0.75" stroke="#d97757" stroke-opacity="0.75" stroke-width="1.5"/>
+    <text class="mono" x="12" y="19" font-size="9.5" fill="#8a847c">&gt;_</text>
+    <circle cx="33" cy="15" r="3.6" fill="#7fb58a"/>
+    <text class="mono title" x="43" y="19">TERMINAL</text>
+    <text class="mono body" x="14" y="56"><tspan class="accent">4bab1a0</tspan> Update README</text>
+    <text class="mono body" x="14" y="74"><tspan class="accent">7b4dd44</tspan> <tspan fill="#e3b35c">tag: v2.0.0</tspan></text>
+    <text class="mono body" x="14" y="92"><tspan class="accent">7b402cc</tspan> Read transcri…</text>
+    <text class="mono body" x="14" y="110"><tspan class="accent">e09a2ab</tspan> Judge waitin…</text>
+    <text class="mono body muted" x="14" y="132">ccanvas <tspan class="accent">❯</tspan></text>
+    <rect class="cursor" x="80" y="123" width="6.5" height="12" fill="#d97757"/>
+  </g>
+
+  <!-- agent: working -->
+  <g transform="translate(620,212)">
+    <rect class="card" width="380" height="112" rx="10" filter="url(#lift)"/>
+    <path class="bar" d="M10 0 H370 A10 10 0 0 1 380 10 V30 H0 V10 A10 10 0 0 1 10 0 Z"/>
+    <line x1="10" y1="0.75" x2="370" y2="0.75" stroke="#d97757" stroke-opacity="0.75" stroke-width="1.5"/>
+    <text class="mono accent" x="13" y="19.5" font-size="11">✦</text>
+    <circle class="working" cx="33" cy="15" r="3.6" fill="#d97757"/>
+    <text class="mono title" x="43" y="19">NPM RUN BUILD</text>
+    <text class="mono meta" x="154" y="19">4t · 28s</text>
+    <rect x="300" y="13" width="44" height="4" rx="2" fill="#ffffff" fill-opacity="0.1"/>
+    <rect x="300" y="13" width="9" height="4" rx="2" fill="#ddd7cf"/>
+    <text class="mono meta" x="366" y="19" text-anchor="end">21%</text>
+    <rect x="10" y="40" width="360" height="20" rx="3" fill="#ffffff" fill-opacity="0.05"/>
+    <text class="mono body" x="14" y="54"><tspan class="muted">❯</tspan> Run npm run build and check its warnings</text>
+    <text class="mono body" x="14" y="78"><tspan class="muted">●</tspan> Running npm run build in project directory</text>
+    <text class="mono body accent" x="14" y="100">✻ Composing… <tspan class="muted">(28s · thinking)</tspan></text>
+  </g>
+
+  <!-- note -->
+  <g transform="translate(1024,212)">
+    <rect class="card" width="136" height="112" rx="10" filter="url(#lift)"/>
+    <path class="bar" d="M10 0 H126 A10 10 0 0 1 136 10 V30 H0 V10 A10 10 0 0 1 10 0 Z"/>
+    <line x1="10" y1="0.75" x2="126" y2="0.75" stroke="#d97757" stroke-opacity="0.75" stroke-width="1.5"/>
+    <text class="mono title" x="14" y="19">NOTE</text>
+    <g class="mono" font-size="10.5">
+      <rect x="14" y="44" width="9" height="9" rx="2" fill="#e3b35c"/>
+      <text x="30" y="52.5" fill="#8a847c" text-decoration="line-through">fast polling</text>
+      <rect x="14" y="64" width="9" height="9" rx="2" fill="#e3b35c"/>
+      <text x="30" y="72.5" fill="#8a847c" text-decoration="line-through">off main thread</text>
+      <rect x="14.5" y="84.5" width="8" height="8" rx="2" fill="none" stroke="#8a847c"/>
+      <text x="30" y="92.5" fill="#c9c3ba">new screenshot</text>
+    </g>
+  </g>
+</svg>

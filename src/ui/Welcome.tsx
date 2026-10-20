@@ -1,20 +1,30 @@
+import { useEffect, useState } from 'react'
+import { viewCenter } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { screenToWorld } from '../lib/geometry'
-import { IconMark, IconFolder } from './icons'
+import { makeGreeting, loadFirstName, type Greeting } from '../lib/greeting'
+import { IconFolder, IconAgent } from './icons'
 
-// 82px = topbar + tabs; matches CHROME_H in App.tsx
-const CHROME_H = 82
 
 export function Welcome() {
   const ws = useStore(selectActive)
   const openAgentWizard = useStore((s) => s.openAgentWizard)
   const setActiveDir = useStore((s) => s.setActiveDir)
+  // chosen once per launch, after the user's name is known
+  const [greeting, setGreeting] = useState<Greeting | null>(null)
+  useEffect(() => {
+    let live = true
+    loadFirstName().then((name) => live && setGreeting(makeGreeting(name)))
+    return () => {
+      live = false
+    }
+  }, [])
   if (ws.elements.length > 0) return null
 
   const spawnFirst = () => {
     const cam = selectActive(useStore.getState()).camera
     const world = screenToWorld(
-      { x: window.innerWidth / 2, y: (window.innerHeight - CHROME_H) / 2 },
+      { x: viewCenter().x, y: viewCenter().y },
       cam,
     )
     openAgentWizard({ x: world.x, y: world.y })
@@ -22,42 +32,39 @@ export function Welcome() {
 
   return (
     <div className="welcome">
-      <div className="welcome__inner fade-up">
-        <div className="welcome__mark">
-          <IconMark />
-        </div>
+      <div className={`welcome__inner${greeting ? ' fade-up' : ' welcome__inner--pending'}`}>
         <h1 className="welcome__title">
-          The canvas for coding with <b>agents</b>
+          <span className="welcome__spark" aria-hidden="true">
+            ✻
+          </span>
+          {greeting?.title ?? ' '}
         </h1>
-        <p className="welcome__sub">
-          Spawn terminals, Claude agents, and live previews on an infinite
-          surface, then sketch the architecture around them. Every tab is a
-          self-contained <span className="kbd">.ccnvs</span> workspace.
-        </p>
+        <p className="welcome__sub">{greeting?.subtitle ?? ' '}</p>
 
-        <div style={{ marginBottom: 24, display: 'flex', gap: 8, justifyContent: 'center' }}>
+        <div style={{ marginBottom: 26, display: 'flex', gap: 8, justifyContent: 'center' }}>
           {ws.dir ? (
-            <button className="tb-btn tb-btn--accent" onClick={spawnFirst}>
-              ✦ Spawn an agent in <span className="kbd">{ws.dir.split(/[\\/]/).pop()}</span>
+            <button className="launcher launcher--agent" onClick={spawnFirst}>
+              <IconAgent />
+              <span className="launcher__label">
+                Start Claude in {ws.dir.split(/[\\/]/).pop()}
+              </span>
             </button>
           ) : (
-            <button className="tb-btn tb-btn--accent" onClick={() => void setActiveDir()}>
-              <IconFolder /> Choose this canvas's folder
+            <button className="launcher launcher--agent" onClick={() => void setActiveDir()}>
+              <IconFolder />
+              <span className="launcher__label">Choose a project folder</span>
             </button>
           )}
         </div>
 
         <div className="welcome__hints">
           <div className="welcome__hint">
-            <span className="kbd">Space</span> quick-insert text or
-            <span className="kbd">/note /term /web /agent</span>
+            <span className="kbd">⌘⇧T</span> new Claude agent
+            <span className="kbd">⌘T</span> new terminal
           </div>
           <div className="welcome__hint">
-            <span className="kbd">H</span> / middle-drag pan
-            <span className="kbd">⌘ scroll</span> zoom
-          </div>
-          <div className="welcome__hint">
-            <span className="kbd">⌘S / ⌘O</span> save &amp; open .ccnvs
+            <span className="kbd">⌘W</span> close the focused box
+            <span className="kbd">⌘K</span> all commands
           </div>
         </div>
       </div>

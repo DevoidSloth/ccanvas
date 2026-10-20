@@ -1,7 +1,7 @@
 {
   "name": "ccanvas",
   "private": true,
-  "version": "0.5.1",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "start": "concurrently -n \"pty,web\" -c \"#e8795a,#6db5a8\" \"npm run server\" \"npm run dev\"",
     "tauri": "tauri",
     "app": "tauri dev",
-    "app:build": "tauri build"
+    "app:build": "tauri build",
+    "app:install": "tauri build --bundles app && ditto src-tauri/target/release/bundle/macos/ccanvas.app /Applications/ccanvas.app"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.4.0",

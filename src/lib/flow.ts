@@ -10,7 +10,7 @@
 import type { ArrowElement, CanvasElement, WidgetElement, Workspace } from './types'
 import { useStore } from '../store/workspace'
 import { sendTo, isLive, stripAnsi, notify } from './agents'
-import { readTranscript, extractLastAssistant } from './transcript'
+import { readTranscriptSummary } from './transcript'
 
 // Heuristic keyword sets for the success/failure conditions. An agent that
 // needs a reliable signal should instead be told to end with a sentinel and
@@ -64,9 +64,8 @@ export function cleanAgentOutput(tail: string): string {
  * Returns null if the transcript can't be read (no backend, unknown path, etc.).
  */
 async function readLastAssistant(source: WidgetElement): Promise<string | null> {
-  const content = await readTranscript(source.cwd, source.sessionId)
-  if (!content) return null
-  return extractLastAssistant(content)
+  const summary = await readTranscriptSummary(source.cwd, source.sessionId)
+  return summary?.lastReply ?? null
 }
 
 /** True if an edge's resolved text would embed the source's output. */

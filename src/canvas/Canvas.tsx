@@ -66,18 +66,8 @@ const QUICK_COMMANDS: QuickCommand[] = [
   { name: 'agent', target: 'agent', desc: 'Claude agent', aliases: ['claude', 'ai'] },
   { name: 'term', target: 'terminal', desc: 'shell terminal', aliases: ['terminal', 'sh', 'shell'] },
   { name: 'files', target: 'files', desc: 'file tree', aliases: ['tree', 'explorer'] },
-  { name: 'diff', target: 'diff', desc: 'git diff', aliases: ['git'] },
+  { name: 'diff', target: 'diff', desc: 'git panel', aliases: ['git'] },
   { name: 'editor', target: 'editor', desc: 'file editor', aliases: ['edit', 'code'] },
-  { name: 'doc', target: 'doc', desc: 'live markdown', aliases: ['readme'] },
-  { name: 'log', target: 'log', desc: 'log tail', aliases: ['tail'] },
-  { name: 'runner', target: 'runner', desc: 'task runner', aliases: ['run', 'test'] },
-  { name: 'data', target: 'data', desc: 'data viewer', aliases: ['csv', 'parquet', 'table', 'df'] },
-  { name: 'plot', target: 'plot', desc: 'figure viewer', aliases: ['fig', 'figure', 'img', 'chart'] },
-  { name: 'pr', target: 'pr', desc: 'pull requests', aliases: ['prs'] },
-  { name: 'issues', target: 'issues', desc: 'github issues', aliases: ['issue'] },
-  { name: 'actions', target: 'runs', desc: 'github actions / CI', aliases: ['runs', 'ci', 'gh'] },
-  { name: 'web', target: 'web', desc: 'web preview', aliases: ['url', 'preview', 'browser'] },
-  { name: 'video', target: 'video', desc: 'video player', aliases: ['movie', 'mp4', 'clip'] },
   { name: 'note', target: 'note', desc: 'markdown note', aliases: ['md', 'markdown'] },
 ]
 
@@ -120,6 +110,21 @@ type Drag =
       began: boolean
     }
   | null
+
+// a 12px "+" in the top-left of each 140px tile, centred on a grid dot
+const REGISTRATION_CROSS = `url("data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><path d='M7 1v12M1 7h12' stroke='rgb(250,249,245)' stroke-opacity='0.09' stroke-width='1'/></svg>",
+)}")`
+
+/** a terminal/agent widget that isn't the one currently clicked into */
+function isIdleTerminal(node: HTMLElement | null): boolean {
+  const id = node?.dataset.widgetId
+  if (!id) return false
+  const st = useStore.getState()
+  if (st.activeWidgetId === id) return false
+  const el = selectActive(st).elements.find((e) => e.id === id)
+  return el?.type === 'widget' && (el.kind === 'terminal' || el.kind === 'agent')
+}
 
 export function Canvas() {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -201,9 +206,11 @@ export function Canvas() {
     if (!node) return
     const onWheel = (e: WheelEvent) => {
       const zoomGesture = e.ctrlKey || e.metaKey
-      const overWidget = !!(e.target as HTMLElement | null)?.closest?.('.widget')
-      // plain scroll over a widget → let that widget scroll its own content
-      if (overWidget && !zoomGesture) return
+      const widgetNode = (e.target as HTMLElement | null)?.closest?.('.widget') as HTMLElement | null
+      const overWidget = !!widgetNode
+      // plain scroll over a widget → let that widget scroll its own content,
+      // except a terminal you haven't clicked into: that scroll moves the canvas
+      if (overWidget && !zoomGesture && !isIdleTerminal(widgetNode)) return
       e.preventDefault()
       // zooming while hovering a widget: don't also scroll the widget under it
       if (overWidget) e.stopPropagation()
@@ -270,6 +277,10 @@ export function Canvas() {
     // a path-bearing widget (files/editor/doc/log/diff) → reveal it on disk
     if (lone?.type === 'widget') {
       const w = lone as WidgetElement
+      if (w.kind === 'terminal' || w.kind === 'agent') {
+        items.push({ label: 'Label…', onClick: () => s().setLabelingWidget(w.id) })
+        items.push({ separator: true })
+      }
       const p = w.path || w.cwd
       if (p) {
         items.push({
@@ -302,11 +313,6 @@ export function Canvas() {
             cwd: agent.cwd,
             title: `${agent.title} · transcript`,
           }),
-      })
-      const boxed = ws.elements.some((e) => e.labelFor === lone.id)
-      items.push({
-        label: boxed ? 'Remove label box' : 'Label box',
-        onClick: () => s().labelAgent(lone.id),
       })
       items.push({ separator: true })
     }
@@ -515,11 +521,17 @@ export function Canvas() {
             : [hit.id]
         setSelection(withGroupSiblings(ws.elements, base))
         startMoveDrag(e)
-      } else {
-        if (!e.shiftKey) clearSelection()
+      } else if (e.shiftKey) {
+        // shift-drag on empty canvas: box-select
         dragRef.current = { kind: 'marquee', start: pt }
         setMarquee({ x: pt.x, y: pt.y, w: 0, h: 0 })
         rootRef.current?.setPointerCapture(e.pointerId)
+      } else {
+        // plain drag on empty canvas moves the view
+        clearSelection()
+        dragRef.current = { kind: 'pan', startCam: { x: cam.x, y: cam.y }, startPtr: pt }
+        rootRef.current?.setPointerCapture(e.pointerId)
+        setPanning(true)
       }
       return
     }
@@ -955,9 +967,10 @@ export function Canvas() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
       style={{
-        backgroundImage: 'radial-gradient(var(--grid-dot) 1px, transparent 1px)',
-        backgroundSize: `${28 * cam.zoom}px ${28 * cam.zoom}px`,
-        backgroundPosition: `${cam.x}px ${cam.y}px`,
+        // fine dot grid, plus a registration cross every 5 cells
+        backgroundImage: `${REGISTRATION_CROSS}, radial-gradient(var(--grid-dot) 1px, transparent 1px)`,
+        backgroundSize: `${140 * cam.zoom}px ${140 * cam.zoom}px, ${28 * cam.zoom}px ${28 * cam.zoom}px`,
+        backgroundPosition: `${cam.x - 7 * cam.zoom}px ${cam.y - 7 * cam.zoom}px, ${cam.x}px ${cam.y}px`,
       }}
     >
       {/* frames sit behind everything */}
@@ -1014,6 +1027,8 @@ export function Canvas() {
             className="canvas__world"
             style={{
               transform: `translate(${tab.camera.x}px, ${tab.camera.y}px) scale(${tab.camera.zoom})`,
+              // lets zoomed-out terminal cards size their text in screen px
+              ['--z' as string]: tab.camera.zoom,
               // hidden (not display:none) so xterm keeps real dimensions and
               // renders correctly even on inactive tabs — it just stays invisible
               visibility: isActiveTab ? undefined : 'hidden',

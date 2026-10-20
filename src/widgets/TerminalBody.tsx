@@ -19,12 +19,45 @@ import {
   notify,
 } from '../lib/agents'
 import { onAgentTurnComplete, cleanAgentOutput } from '../lib/flow'
+import {
+  DEFAULT_THEME,
+  fontBase,
+  terminalFontFamily,
+  useTerminalProfile,
+} from '../lib/termProfile'
 
 type Mode = 'connecting' | 'pty' | 'local'
 
-// base font size; scaled up by the supersample factor when the canvas is
-// zoomed in so the terminal stays crisp under the world's CSS transform
-const BASE_FONT = 12.5
+// xterm maps a pointer to a cell as (clientY - rect.top) / cssCellHeight, where
+// the rect is post-transform but the cell size isn't. Whenever the terminal's
+// net on-screen scale isn't 1 — canvas zoomed below 100% (k is floored at 1),
+// or mid-gesture before the debounced k catches up — clicks and selections land
+// on the wrong row/column. Undo the scale before xterm sees the event. The
+// mouse service is a shared instance, so this covers selection, links and
+// mouse reporting alike.
+type Pt = { clientX: number; clientY: number }
+function patchMouseScale(term: Terminal) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ms = (term as any)._core?._mouseService
+  if (!ms || ms.__scalePatched) return
+  const unscale = <E extends Pt>(ev: E, element: HTMLElement): E => {
+    const r = element.getBoundingClientRect()
+    const sx = element.offsetWidth ? r.width / element.offsetWidth : 1
+    const sy = element.offsetHeight ? r.height / element.offsetHeight : 1
+    if (Math.abs(sx - 1) < 1e-3 && Math.abs(sy - 1) < 1e-3) return ev
+    return {
+      clientX: r.left + (ev.clientX - r.left) / sx,
+      clientY: r.top + (ev.clientY - r.top) / sy,
+    } as E
+  }
+  const getCoords = ms.getCoords.bind(ms)
+  const getReport = ms.getMouseReportCoords.bind(ms)
+  ms.getCoords = (ev: Pt, element: HTMLElement, ...rest: unknown[]) =>
+    getCoords(unscale(ev, element), element, ...rest)
+  ms.getMouseReportCoords = (ev: MouseEvent, element: HTMLElement) =>
+    getReport(unscale(ev, element), element)
+  ms.__scalePatched = true
+}
 
 // Terminal widget. Prefers a real shell — the in-process PTY under Tauri, or the
 // optional WebSocket bridge in the browser. Falls back to a tiny in-browser
@@ -62,11 +95,14 @@ export function TerminalBody({
   })
   // connect only once the terminal has actually been shown — opening/writing an
   // xterm on a hidden tab leaves its renderer blank. Once armed it stays armed,
-  // so the live shell persists when you switch away and back.
-  const [armed, setArmed] = useState(visible)
+  // so the live shell persists when you switch away and back. It also waits for
+  // the user's terminal profile so the xterm is created with their look.
+  const [shown, setShown] = useState(visible)
   useEffect(() => {
-    if (visible) setArmed(true)
+    if (visible) setShown(true)
   }, [visible])
+  const profile = useTerminalProfile()
+  const armed = shown && profile !== undefined
 
   const mutateElement = useStore((s) => s.mutateElement)
   const isAgent = el.kind === 'agent'
@@ -98,41 +134,21 @@ export function TerminalBody({
   useEffect(() => {
     if (!armed || !innerRef.current || !hostRef.current) return
     const term = new Terminal({
-      fontFamily: "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
-      fontSize: BASE_FONT * kRef.current,
-      lineHeight: 1.25,
-      cursorBlink: true,
-      cursorStyle: 'bar',
+      fontFamily: terminalFontFamily(profile),
+      fontSize: fontBase(profile) * kRef.current,
+      lineHeight: profile?.lineHeight ?? 1.25,
+      cursorBlink: profile?.cursorBlink ?? true,
+      cursorStyle: profile?.cursorStyle ?? 'bar',
+      drawBoldTextInBrightColors: profile?.boldIsBright ?? true,
       allowProposedApi: true,
-      theme: {
-        background: '#0a0b0d',
-        foreground: '#e8e6e1',
-        cursor: '#e8795a',
-        cursorAccent: '#0a0b0d',
-        selectionBackground: 'rgba(232,121,90,0.25)',
-        black: '#1a1d24',
-        red: '#e8795a',
-        green: '#8bbf73',
-        yellow: '#d8a657',
-        blue: '#6db5a8',
-        magenta: '#c89bd6',
-        cyan: '#7fc7c0',
-        white: '#c8c6c0',
-        brightBlack: '#61605b',
-        brightRed: '#f08e72',
-        brightGreen: '#a6d189',
-        brightYellow: '#e5c07b',
-        brightBlue: '#82c7bb',
-        brightMagenta: '#d9b3e3',
-        brightCyan: '#98d4cd',
-        brightWhite: '#e8e6e1',
-      },
+      theme: { ...DEFAULT_THEME, ...profile?.theme },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(innerRef.current)
     termRef.current = term
     fitRef.current = fit
+    patchMouseScale(term)
 
     // ---- clickable filenames ----
     // Underline any openable file path in the output and, on click, open it in
@@ -405,6 +421,23 @@ export function TerminalBody({
       const s = stripAnsi(tail)
       return /[╭╮╰╯┌┐└┘│─]/.test(s) || /\? for shortcuts/i.test(s)
     }
+    // Is the program asking you something right now? Judged from the rendered
+    // screen, not the output stream: the stream still holds text that has since
+    // been redrawn away (your typed prompt, an answered permission dialog), and
+    // a Claude reply ending "Do you want me to…?" leaves it idle at its input
+    // box, not blocked. In Claude's UI only an open dialog counts — a numbered
+    // choice menu (❯ 1. Yes) or the "Esc to cancel" footer every dialog has;
+    // anywhere else, a y/n-style question on the last few lines.
+    const looksWaiting = () => {
+      const b = term.buffer.active
+      const lines: string[] = []
+      for (let y = b.baseY; y < b.baseY + term.rows; y++)
+        lines.push(b.getLine(y)?.translateToString(true) ?? '')
+      const screen = lines.join('\n')
+      if (/[╭╮╰╯┌┐└┘│─]/.test(screen) || /\? for shortcuts/i.test(screen))
+        return /❯\s*\d+\./.test(screen) || /esc to cancel/i.test(screen)
+      return looksLikePrompt(lines.filter((l) => l.trim()).slice(-3).join('\n'))
+    }
     const becomeReady = () => {
       if (ready) return
       ready = true
@@ -420,7 +453,7 @@ export function TerminalBody({
       if (!isAgent || modeRef.current !== 'pty') return
       if (!ready) {
         // wait until Claude's UI is up and it isn't mid-question (trust/permission)
-        if (!looksLikeClaude() || looksLikePrompt(tail)) return
+        if (!looksLikeClaude() || looksWaiting()) return
         becomeReady()
         return
       }
@@ -473,10 +506,11 @@ export function TerminalBody({
       wasWorking = true
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = setTimeout(() => {
-        const waiting = looksLikePrompt(tail)
+        const waiting = looksWaiting()
         setAgentStatus(el.id, waiting ? 'waiting' : 'idle')
-        // surface the last meaningful line for the agent roster
-        if (isAgent) {
+        // surface the last meaningful line for the agent roster and the
+        // zoomed-out terminal card
+        {
           const last = cleanAgentOutput(tail).split('\n').filter(Boolean).pop()
           if (last) useAgents.getState().setLastLine(el.id, last.slice(0, 160))
         }
@@ -504,8 +538,10 @@ export function TerminalBody({
           const turns = useAgents.getState().metrics[el.id]?.turns ?? 0
           if (ready && launchTasks.length === 0) {
             if (flowArmTurn === null) flowArmTurn = turns
-            else if (!waiting && turns > flowArmTurn)
+            else if (!waiting && turns > flowArmTurn) {
+              useAgents.getState().markFinished(el.id)
               void onAgentTurnComplete(el.id, turns, tail)
+            }
           }
         }
         onSettle()
@@ -601,8 +637,10 @@ export function TerminalBody({
   }, [armed, attempt])
 
   useEffect(() => {
+    // clicked out → stop taking keystrokes
     if (active) termRef.current?.focus()
-  }, [active])
+    else termRef.current?.blur()
+  }, [active, armed])
 
   // Match the supersample factor to the live zoom (debounced so the font only
   // re-measures once the gesture settles, not every frame). xterm maps a click
@@ -637,7 +675,7 @@ export function TerminalBody({
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    term.options.fontSize = BASE_FONT * k
+    term.options.fontSize = fontBase(profile) * k
     const raf = requestAnimationFrame(() => {
       try {
         fitRef.current?.fit()
@@ -696,7 +734,11 @@ export function TerminalBody({
   }
 
   return (
-    <div className="term" onContextMenu={onContextMenu}>
+    <div
+      className="term"
+      style={{ background: profile?.theme.background ?? DEFAULT_THEME.background }}
+      onContextMenu={onContextMenu}
+    >
       <div ref={hostRef} className="term__screen">
         <div
           ref={innerRef}

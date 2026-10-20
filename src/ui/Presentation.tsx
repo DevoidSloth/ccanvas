@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { viewport } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { clamp } from '../lib/geometry'
 import type { FrameElement } from '../lib/types'
@@ -6,7 +7,6 @@ import type { FrameElement } from '../lib/types'
 // Presentation mode: step through the canvas's frames like slides, zooming the
 // camera to each. Arrow keys / space navigate; Esc exits.
 
-const CHROME_H = 82
 
 export function Presentation() {
   const presenting = useStore((s) => s.presenting)
@@ -32,8 +32,8 @@ export function Presentation() {
     if (!presenting || !frames.length) return
     const f = frames[Math.min(i, frames.length - 1)]
     const pad = 70
-    const vw = window.innerWidth
-    const vh = window.innerHeight - CHROME_H
+    const vw = viewport().vw
+    const vh = viewport().vh
     const zoom = clamp(Math.min(vw / (f.w + pad * 2), vh / (f.h + pad * 2)), 0.1, 2)
     const cx = f.x + f.w / 2
     const cy = f.y + f.h / 2

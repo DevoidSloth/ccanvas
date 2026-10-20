@@ -1,17 +1,18 @@
 import { useEffect } from 'react'
+import { viewport, viewCenter, orderedTerminals, focusWidget, cycleTerminal, exitTerminal } from './lib/view'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { isTauri } from './lib/backend'
 import { useStore, selectActive } from './store/workspace'
-import type { Tool } from './lib/types'
 import { zoomAt, screenToWorld } from './lib/geometry'
 import { TopBar } from './ui/TopBar'
-import { Tabs } from './ui/Tabs'
+import { TermNumbers } from './ui/TermNumbers'
 import { Canvas } from './canvas/Canvas'
 import { Toolbar } from './ui/Toolbar'
-import { Props } from './ui/Props'
 import { Hud } from './ui/Hud'
 import { Welcome } from './ui/Welcome'
 import { SelectionBar } from './ui/SelectionBar'
 import { CommandPalette } from './ui/CommandPalette'
-import { Minimap } from './ui/Minimap'
 import { AgentWizard } from './ui/AgentWizard'
 import { AttentionBar } from './ui/AttentionBar'
 import { Presentation } from './ui/Presentation'
@@ -19,37 +20,161 @@ import { ContextMenuHost, isEditableTarget } from './ui/ContextMenu'
 import { Roster } from './ui/Roster'
 import { PromptLibrary } from './ui/PromptLibrary'
 import { Checkpoints } from './ui/Checkpoints'
+import { MemoryPanel } from './ui/MemoryPanel'
 import { CanvasSearch } from './ui/CanvasSearch'
+import { Minibuffer } from './ui/Minibuffer'
 import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
+import { useTerminalFileDrop } from './lib/fileDrop'
+import { SettingsPanel } from './ui/SettingsPanel'
+import { inEmacs } from './lib/terminal'
+import {
+  useSettings,
+  activeBindings,
+  matches,
+  hasModifier,
+  echoCombo,
+  isModifierKey,
+  keyRecorder,
+  type Binding,
+} from './lib/settings'
 
-// topbar (44) + tabs (38); keep in sync with --topbar-h / --tabs-h in global.css
-const CHROME_H = 82
-
-const TOOL_KEYS: Record<string, Tool> = {
-  v: 'select',
-  h: 'pan',
-  t: 'text',
-  p: 'pen',
-  d: 'pen',
-  a: 'arrow',
-  r: 'rect',
-  o: 'ellipse',
-  f: 'frame',
-  e: 'eraser',
-}
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
 
 // Anchor zooms at the centre of the canvas area (below the chrome).
-function canvasCenter() {
-  return { x: window.innerWidth / 2, y: (window.innerHeight - CHROME_H) / 2 }
-}
+const canvasCenter = viewCenter
 function worldCenter() {
   return screenToWorld(canvasCenter(), selectActive(useStore.getState()).camera)
 }
 
+// ⌘W: close the widget you're in — the one holding keyboard focus (e.g. a
+// terminal you're typing in), else the active one, else the selected widgets.
+// With no widget left on any tab, quit the app.
+function closeCurrentWidget() {
+  const store = useStore.getState()
+  const ws = store.active()
+  const widgetIds = new Set(
+    (ws?.elements ?? []).filter((e) => e.type === 'widget').map((e) => e.id),
+  )
+  const focused = (document.activeElement as HTMLElement | null)
+    ?.closest?.('[data-widget-id]')
+    ?.getAttribute('data-widget-id')
+  let targets: string[] = []
+  if (focused && widgetIds.has(focused)) targets = [focused]
+  else if (store.activeWidgetId && widgetIds.has(store.activeWidgetId))
+    targets = [store.activeWidgetId]
+  else targets = store.selection.filter((id) => widgetIds.has(id))
+
+  if (targets.length) {
+    store.removeElements(targets)
+    store.setActiveWidget(null)
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
+    return
+  }
+  const anyWidgets = store.tabs.some((t) => t.elements.some((e) => e.type === 'widget'))
+  if (!anyWidgets) void invoke('quit_app')
+}
+
 export default function App() {
+  useTerminalFileDrop()
   const tool = useStore((s) => s.tool)
   const openPanel = useStore((s) => s.openPanel)
+
+  // Terminal navigation runs in the capture phase, ahead of xterm, so the keys
+  // work while you're typing in a terminal and never reach the shell:
+  //   ⌘1–9     jump to the Nth terminal (reading order) and click into it
+  //   ⌘⇧] / ⌘⇧[  next / previous terminal
+  //   ⌘Esc     click out of the current terminal
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || (e.ctrlKey && !IS_MAC))) return
+      if (e.altKey) return
+      const stop = () => {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      if (!e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+        const t = orderedTerminals()[Number(e.code.slice(5)) - 1]
+        if (t) {
+          stop()
+          focusWidget(t.id)
+        }
+        return
+      }
+      if (e.shiftKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+        stop()
+        cycleTerminal(e.code === 'BracketRight' ? 1 : -1)
+        return
+      }
+      if (e.key === 'Escape' && useStore.getState().activeWidgetId) {
+        stop()
+        exitTerminal()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  // Tab-finder shortcuts from Settings: ⌃X ⌃F (emacs), `:` / gt / gT (vim),
+  // plus any custom ones. Capture phase so modifier chords work from inside a
+  // terminal too (the prefix is swallowed there); bare keys only fire outside
+  // text fields and terminals. Any key that doesn't continue a chord cancels it.
+  // A focused terminal running emacs keeps every key: ⌃X ⌃F is emacs's there.
+  useEffect(() => {
+    let timer: number | undefined
+    let pending: Binding[] = []
+    const clear = () => {
+      window.clearTimeout(timer)
+      pending = []
+      if (useStore.getState().minibuffer === 'chord') useStore.getState().setMinibuffer(null)
+    }
+    const run = (b: Binding) => {
+      const store = useStore.getState()
+      if (b.action === 'finder') {
+        store.setMinibuffer('tab', b.prompt)
+        return
+      }
+      store.setMinibuffer(null)
+      const { tabs, activeTabId } = store
+      const i = tabs.findIndex((t) => t.id === activeTabId)
+      const step = b.action === 'nextTab' ? 1 : -1
+      const next = tabs[(i + step + tabs.length) % tabs.length]
+      if (next) store.switchTab(next.id)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (isModifierKey(e) || keyRecorder.active) return
+      const store = useStore.getState()
+      if (store.minibuffer === 'chord') {
+        e.preventDefault()
+        e.stopPropagation()
+        const done = pending.find((b) => matches(b.seq[1], e))
+        clear()
+        if (done) run(done)
+        return
+      }
+      if (store.minibuffer || inEmacs(e.target)) return
+      const editing = isEditableTarget(e.target)
+      const hits = activeBindings(useSettings.getState()).filter(
+        (b) => matches(b.seq[0], e) && (hasModifier(b.seq[0]) || !editing),
+      )
+      if (!hits.length) return
+      e.preventDefault()
+      e.stopPropagation()
+      const now = hits.find((b) => b.seq.length === 1)
+      if (now) {
+        run(now)
+        return
+      }
+      pending = hits
+      store.setMinibuffer('chord', `${echoCombo(hits[0].seq[0])} -`)
+      timer = window.setTimeout(clear, 2500)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.clearTimeout(timer)
+    }
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -59,7 +184,9 @@ export default function App() {
         t.tagName === 'INPUT' ||
         t.tagName === 'TEXTAREA' ||
         t.closest('.xterm') != null
-      const mod = e.metaKey || e.ctrlKey
+      // On macOS Ctrl belongs to the terminal (C-x, C-c, C-a…), so only ⌘
+      // triggers canvas shortcuts there; elsewhere Ctrl is the modifier.
+      const mod = e.metaKey || (e.ctrlKey && !IS_MAC)
       const key = e.key.toLowerCase()
       const store = useStore.getState()
 
@@ -78,9 +205,28 @@ export default function App() {
         store.newTab()
         return
       }
+      // ⌘T new terminal, ⌘⇧T new Claude agent — dropped at the centre of the
+      // view and focused so you can type right away (works from inside a terminal)
+      if (mod && key === 't' && !e.altKey) {
+        e.preventDefault()
+        const w = worldCenter()
+        const id = store.spawnWidget(e.shiftKey ? 'agent' : 'terminal', w.x, w.y)
+        store.setSelection([id])
+        store.setActiveWidget(id)
+        return
+      }
+      // ⌘⇧V opens a VS Code widget for this canvas's folder
+      if (mod && e.shiftKey && key === 'v' && !e.altKey) {
+        e.preventDefault()
+        const w = worldCenter()
+        const id = store.spawnWidget('vscode', w.x, w.y)
+        store.setSelection([id])
+        store.setActiveWidget(id)
+        return
+      }
       if (mod && key === 'k') {
         e.preventDefault()
-        store.setPaletteOpen(true)
+        store.setPaletteOpen(!store.paletteOpen)
         return
       }
       // ⌘F opens canvas search — but only when not typing into a field or a
@@ -169,14 +315,30 @@ export default function App() {
       // focus / zoom to the current selection
       if (e.key === '\\') {
         e.preventDefault()
-        store.zoomToSelection(window.innerWidth, window.innerHeight - CHROME_H)
+        store.zoomToSelection(viewport().vw, viewport().vh)
         return
       }
-      const mapped = TOOL_KEYS[key]
-      if (mapped) store.setTool(mapped)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // the desktop menu's ⌘W item routes here instead of closing the window
+  useEffect(() => {
+    if (!isTauri()) return
+    const unlisten = listen('menu:close-widget', closeCurrentWidget)
+    return () => {
+      void unlisten.then((off) => off())
+    }
+  }, [])
+
+  // ccanvas → Settings… (⌘,) in the macOS app menu opens the settings panel
+  useEffect(() => {
+    if (!isTauri()) return
+    const unlisten = listen('menu:open-settings', () => useStore.getState().setOpenPanel('settings'))
+    return () => {
+      void unlisten.then((off) => off())
+    }
   }, [])
 
   // paste an image from the clipboard onto the canvas
@@ -239,16 +401,14 @@ export default function App() {
   return (
     <div className="app" data-tool={tool}>
       <TopBar />
-      <Tabs />
       <main className="app__main">
         <Canvas />
+        <TermNumbers />
         <Welcome />
         <Toolbar />
-        <Props />
         <SelectionBar />
         <AttentionBar />
         <TrackingBar />
-        <Minimap />
         <Hud />
         <CommandPalette />
         <CanvasSearch />
@@ -257,7 +417,10 @@ export default function App() {
         {openPanel === 'roster' && <Roster />}
         {openPanel === 'prompts' && <PromptLibrary />}
         {openPanel === 'checkpoints' && <Checkpoints />}
+        {openPanel === 'memory' && <MemoryPanel />}
+        {openPanel === 'settings' && <SettingsPanel />}
       </main>
+      <Minibuffer />
       <ContextMenuHost />
       <FollowController />
     </div>

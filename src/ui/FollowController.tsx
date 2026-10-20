@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
+import { viewCenter } from '../lib/view'
 import { useStore } from '../store/workspace'
 import { useAgents, type AgentStatus } from '../lib/agents'
 
-const CHROME_H = 82
 
 // Headless controller for "follow the active agent": when enabled, the camera
 // pans to whichever agent most recently started working. Tracking-camera mode
@@ -19,8 +19,8 @@ function centerOnAgent(id: string) {
   const cy = agent.y + agent.h / 2
   s.setCamera({
     zoom: cam.zoom,
-    x: window.innerWidth / 2 - cx * cam.zoom,
-    y: (window.innerHeight - CHROME_H) / 2 - cy * cam.zoom,
+    x: viewCenter().x - cx * cam.zoom,
+    y: viewCenter().y - cy * cam.zoom,
   })
   s.setSelection([id])
 }

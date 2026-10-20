@@ -2,11 +2,21 @@
 // ~/.claude/projects/**/*.jsonl. Each assistant line carries a `message.usage`
 // block + an ISO `timestamp`; we sum tokens into the active 5-hour rate-limit
 // window (and the last 24h) the same way `ccusage` does.
+//
+// The recent transcripts add up to hundreds of MB, so each file's usage lines
+// are cached between scans and a scan parses only what was appended since.
 
 use serde::Serialize;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
+
+use crate::transcript::{as_text, read_appended};
 
 const FIVE_H_MS: i64 = 5 * 3600 * 1000;
 const HOUR_MS: i64 = 3600 * 1000;
@@ -35,8 +45,8 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146097 + doe - 719468
 }
 
-// parse `YYYY-MM-DDTHH:MM:SS(.sss)?Z` (always UTC) → epoch ms
-fn parse_iso_ms(s: &str) -> Option<i64> {
+// parse `YYYY-MM-DDTHH:MM:SS(.sss)?` (UTC; any trailing zone ignored) → epoch ms
+pub(crate) fn parse_iso_ms(s: &str) -> Option<i64> {
     if s.len() < 19 {
         return None;
     }
@@ -65,73 +75,138 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Every `.jsonl` under `dir`, recursively (subagent transcripts live in
+/// per-session subfolders), skipping files not modified since `cutoff`.
+fn recent_jsonl(dir: &Path, cutoff: i64, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for ent in rd.flatten() {
+        let p = ent.path();
+        let Ok(meta) = ent.metadata() else { continue };
+        if meta.is_dir() {
+            recent_jsonl(&p, cutoff, out);
+        } else if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            let recent = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64 >= cutoff)
+                .unwrap_or(true);
+            if recent {
+                out.push(p);
+            }
+        }
+    }
+}
+
+/// One usage line of a transcript.
+struct UsageLine {
+    /// epoch ms (None when the line has no readable timestamp)
+    ts: Option<i64>,
+    tokens: u64,
+    /// hash of the message id + request id (None when the line has no id)
+    key: Option<u64>,
+}
+
+/// A transcript's usage lines so far, and the byte offset they were read up to.
+#[derive(Default)]
+struct FileUsage {
+    offset: u64,
+    lines: Vec<UsageLine>,
+}
+
+impl FileUsage {
+    fn update(&mut self, path: &Path) -> std::io::Result<()> {
+        let (bytes, next) = match read_appended(path, self.offset)? {
+            Some(r) => r,
+            // rewritten rather than appended to: start over
+            None => {
+                *self = Self::default();
+                read_appended(path, 0)?.unwrap_or_default()
+            }
+        };
+        for line in as_text(&bytes).lines() {
+            if !line.contains("\"usage\"") {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            let u = &v["message"]["usage"];
+            if u.is_null() {
+                continue;
+            }
+            let key = v["message"]["id"].as_str().map(|id| {
+                let mut h = DefaultHasher::new();
+                (id, v["requestId"].as_str().unwrap_or("")).hash(&mut h);
+                h.finish()
+            });
+            // count new work (input + output + cache writes); cache *reads* are
+            // cheap and re-counted every turn, so excluding them keeps the
+            // number a meaningful usage signal
+            let tokens = u["input_tokens"].as_u64().unwrap_or(0)
+                + u["output_tokens"].as_u64().unwrap_or(0)
+                + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+            let ts = v["timestamp"].as_str().and_then(parse_iso_ms);
+            self.lines.push(UsageLine { ts, tokens, key });
+        }
+        self.offset = next;
+        Ok(())
+    }
+}
+
+fn cache() -> &'static Mutex<HashMap<PathBuf, FileUsage>> {
+    static C: OnceLock<Mutex<HashMap<PathBuf, FileUsage>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 #[tauri::command]
-pub fn claude_usage(app: AppHandle) -> ClaudeUsage {
+pub async fn claude_usage(app: AppHandle) -> ClaudeUsage {
     let Ok(home) = app.path().home_dir() else {
         return ClaudeUsage::default();
     };
     let root = home.join(".claude").join("projects");
+    tauri::async_runtime::spawn_blocking(move || usage(&root))
+        .await
+        .unwrap_or_default()
+}
+
+fn usage(root: &Path) -> ClaudeUsage {
     let now = now_ms();
     // only files touched recently can hold entries inside our windows
     let cutoff = now - 25 * HOUR_MS;
 
+    let mut files = Vec::new();
+    recent_jsonl(root, cutoff, &mut files);
+
+    let mut cache = cache().lock().unwrap();
+    // forget transcripts that have gone quiet for longer than the window
+    let recent: HashSet<&PathBuf> = files.iter().collect();
+    cache.retain(|p, _| recent.contains(p));
+
     let mut entries: Vec<(i64, u64)> = Vec::new();
-    if let Ok(projects) = fs::read_dir(&root) {
-        for proj in projects.flatten() {
-            let pdir = proj.path();
-            if !pdir.is_dir() {
+    // Claude Code writes one line per content block of a reply, each repeating
+    // the same message id + usage; count each API response once
+    let mut seen: HashSet<u64> = HashSet::new();
+    for fp in &files {
+        let file = cache.entry(fp.clone()).or_default();
+        if file.update(fp).is_err() {
+            continue;
+        }
+        for l in &file.lines {
+            if let Some(key) = l.key {
+                if !seen.insert(key) {
+                    continue;
+                }
+            }
+            if l.tokens == 0 {
                 continue;
             }
-            let Ok(files) = fs::read_dir(&pdir) else {
-                continue;
-            };
-            for f in files.flatten() {
-                let fp = f.path();
-                if fp.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                    continue;
-                }
-                let recent = f
-                    .metadata()
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as i64 >= cutoff)
-                    .unwrap_or(true);
-                if !recent {
-                    continue;
-                }
-                let Ok(content) = fs::read_to_string(&fp) else {
-                    continue;
-                };
-                for line in content.lines() {
-                    if !line.contains("\"usage\"") {
-                        continue;
-                    }
-                    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
-                        continue;
-                    };
-                    let u = &v["message"]["usage"];
-                    if u.is_null() {
-                        continue;
-                    }
-                    // count new work (input + output + cache writes); cache
-                    // *reads* are cheap and re-counted every turn, so excluding
-                    // them keeps the number a meaningful usage signal
-                    let tok = u["input_tokens"].as_u64().unwrap_or(0)
-                        + u["output_tokens"].as_u64().unwrap_or(0)
-                        + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-                    if tok == 0 {
-                        continue;
-                    }
-                    if let Some(ts) = v["timestamp"].as_str().and_then(parse_iso_ms) {
-                        if ts >= cutoff {
-                            entries.push((ts, tok));
-                        }
-                    }
-                }
+            if let Some(ts) = l.ts.filter(|&ts| ts >= cutoff) {
+                entries.push((ts, l.tokens));
             }
         }
     }
+    drop(cache);
 
     if entries.is_empty() {
         return ClaudeUsage::default();
@@ -142,14 +217,16 @@ pub fn claude_usage(app: AppHandle) -> ClaudeUsage {
     let day_tokens: u64 = entries.iter().filter(|e| e.0 >= day_cut).map(|e| e.1).sum();
 
     // group into 5-hour blocks; a new block starts on a >5h gap or once 5h
-    // have elapsed since the block's first message
-    let mut block_start = entries[0].0;
+    // have elapsed since the block began. Blocks begin on the hour of their
+    // first message, which is how Claude's rate-limit windows line up.
+    let floor_hour = |ts: i64| ts - ts.rem_euclid(HOUR_MS);
+    let mut block_start = floor_hour(entries[0].0);
     let mut block_tokens = 0u64;
     let mut block_msgs = 0u64;
     let mut prev = entries[0].0;
     for &(ts, tok) in &entries {
         if ts - block_start >= FIVE_H_MS || ts - prev > FIVE_H_MS {
-            block_start = ts;
+            block_start = floor_hour(ts);
             block_tokens = 0;
             block_msgs = 0;
         }

@@ -1,34 +1,69 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { viewCenter } from '../lib/view'
 import { useStore } from '../store/workspace'
-import { useAgents, sendPrompt } from '../lib/agents'
+import { useAgents, useDisplayStatus, sendPrompt } from '../lib/agents'
+import { watchTranscriptSummary } from '../lib/transcript'
 import type { WidgetElement, Workspace } from '../lib/types'
-import { IconClose, IconBroadcast, IconTrack } from './icons'
+import { IconClose, IconBroadcast } from './icons'
 import '../styles/agent-tools.css'
 
-const CHROME_H = 82
 
 type Row = { agent: WidgetElement; tab: Workspace }
+
+/** Each agent's latest reply, read from its session transcript. The terminal
+ *  tail is full of TUI chrome (spinners, hints, box drawing), so it isn't used. */
+function useLastMessages(rows: Row[]): Record<string, string> {
+  const [msgs, setMsgs] = useState<Record<string, string>>({})
+  const key = rows.map((r) => `${r.agent.id}:${r.agent.cwd}:${r.agent.sessionId}`).join('|')
+  useEffect(() => {
+    const offs = rows.map(({ agent }) =>
+      watchTranscriptSummary(agent.cwd, agent.sessionId, (summary) => {
+        // one readable line: first non-empty line, markdown markers dropped
+        const line = summary?.lastReply
+          ?.split('\n')
+          .map((l) => l.replace(/^[#>*\-\s`]+/, '').trim())
+          .find(Boolean)
+          ?.slice(0, 160)
+        setMsgs((m) => {
+          if (m[agent.id] === line) return m
+          const next = { ...m }
+          if (line) next[agent.id] = line
+          else delete next[agent.id]
+          return next
+        })
+      }),
+    )
+    return () => offs.forEach((off) => off())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return msgs
+}
 
 // Mission-control list of every agent across all tabs: status, cost/turns, last
 // line, click-to-focus, and a composer that sends to one agent or broadcasts to
 // all. The spatial canvas is great for layout but poor at "is anything stuck?" —
 // this is the at-scale answer.
+function RosterDot({ id }: { id: string }) {
+  const st = useDisplayStatus(id) ?? 'off'
+  return (
+    <span
+      className={`agent-dot agent-dot--${st}`}
+      title={st === 'done' ? 'just finished' : st}
+    />
+  )
+}
+
 export function Roster() {
   const tabs = useStore((s) => s.tabs)
   const activeTabId = useStore((s) => s.activeTabId)
-  const trackingId = useStore((s) => s.trackingAgentId)
   const switchTab = useStore((s) => s.switchTab)
   const setCamera = useStore((s) => s.setCamera)
   const setSelection = useStore((s) => s.setSelection)
   const setActiveWidget = useStore((s) => s.setActiveWidget)
   const bringToFront = useStore((s) => s.bringToFront)
-  const startTrackingAgent = useStore((s) => s.startTrackingAgent)
-  const stopTrackingAgent = useStore((s) => s.stopTrackingAgent)
   const setOpenPanel = useStore((s) => s.setOpenPanel)
 
-  const status = useAgents((s) => s.status)
   const metrics = useAgents((s) => s.metrics)
-  const lastLine = useAgents((s) => s.lastLine)
 
   const [text, setText] = useState('')
   const [target, setTarget] = useState<string | null>(null) // agent id, or null = all
@@ -40,6 +75,7 @@ export function Roster() {
         if (e.type === 'widget' && e.kind === 'agent') out.push({ agent: e, tab })
     return out
   }, [tabs])
+  const lastMessage = useLastMessages(rows)
 
   const focus = (row: Row) => {
     if (activeTabId !== row.tab.id) switchTab(row.tab.id)
@@ -48,8 +84,8 @@ export function Roster() {
     const cy = row.agent.y + row.agent.h / 2
     setCamera({
       zoom: cam.zoom,
-      x: window.innerWidth / 2 - cx * cam.zoom,
-      y: (window.innerHeight - CHROME_H) / 2 - cy * cam.zoom,
+      x: viewCenter().x - cx * cam.zoom,
+      y: viewCenter().y - cy * cam.zoom,
     })
     setSelection([row.agent.id])
     setActiveWidget(row.agent.id)
@@ -84,20 +120,18 @@ export function Roster() {
 
       <div className="panel__body">
         {rows.length === 0 && (
-          <div className="panel__empty">No agents yet. Spawn one with the “a” tool or ⌘K.</div>
+          <div className="panel__empty">No agents yet. Start one with ⌘⇧T.</div>
         )}
         {rows.map((row) => {
-          const st = status[row.agent.id] ?? 'off'
           const m = metrics[row.agent.id]
-          const ll = lastLine[row.agent.id]
-          const tracking = trackingId === row.agent.id
+          const ll = lastMessage[row.agent.id]
           return (
             <div
               key={row.agent.id}
               className={`roster__row${target === row.agent.id ? ' roster__row--target' : ''}`}
               onClick={() => focus(row)}
             >
-              <span className={`agent-dot agent-dot--${st}`} title={st} />
+              <RosterDot id={row.agent.id} />
               <div className="roster__main">
                 <div className="roster__top">
                   <span className="roster__name">{row.agent.title}</span>
@@ -112,17 +146,6 @@ export function Roster() {
                 </div>
                 {ll && <div className="roster__last">{ll}</div>}
               </div>
-              <button
-                className={`roster__track${tracking ? ' roster__track--on' : ''}`}
-                title={tracking ? 'Stop tracking camera' : 'Track this agent (orbit its files)'}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (tracking) stopTrackingAgent(false)
-                  else void startTrackingAgent(row.agent.id)
-                }}
-              >
-                <IconTrack size={15} />
-              </button>
             </div>
           )
         })}

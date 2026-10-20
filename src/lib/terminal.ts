@@ -159,3 +159,41 @@ function connectWebSocket(opts: PtyOpts, h: PtyHandlers): Promise<Term | null> {
     }
   })
 }
+
+// ----- foreground program -----
+// What each shell is running in the foreground (`zsh`, `emacs-30.1`, `claude`…),
+// refreshed for the terminal holding keyboard focus so key handlers can check
+// it synchronously — e.g. to leave ⌃X chords to emacs.
+
+const foreground = new Map<string, string>()
+
+async function refreshForeground(id: string) {
+  const name = await invoke<string | null>('pty_foreground', { id }).catch(() => null)
+  if (name) foreground.set(id, name)
+  else foreground.delete(id)
+}
+
+/** Widget id of the terminal an event target sits in, if any. */
+export function terminalIdOf(target: EventTarget | null): string | null {
+  const el = target as HTMLElement | null
+  if (!el?.closest?.('.xterm')) return null
+  return el.closest('[data-widget-id]')?.getAttribute('data-widget-id') ?? null
+}
+
+/** Is `target` inside a terminal whose foreground program is emacs? */
+export function inEmacs(target: EventTarget | null): boolean {
+  const id = terminalIdOf(target)
+  const name = id ? foreground.get(id) : undefined
+  return !!name && /^emacs/i.test(name)
+}
+
+if (isTauri()) {
+  window.addEventListener('focusin', (e) => {
+    const id = terminalIdOf(e.target)
+    if (id) void refreshForeground(id)
+  })
+  window.setInterval(() => {
+    const id = terminalIdOf(document.activeElement)
+    if (id) void refreshForeground(id)
+  }, 500)
+}

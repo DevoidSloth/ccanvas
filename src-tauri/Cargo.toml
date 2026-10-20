@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.5.1"
+version = "2.0.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -27,3 +27,7 @@ tauri-plugin-dialog = "2"
 portable-pty = "0.9"
 notify = "6"
 base64 = "0.22"
+plist = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

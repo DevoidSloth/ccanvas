@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- ccanvas mark: a canvas laid out as three panes. The clay pane is the live
+       Claude terminal (prompt chevron); the others are the terminals around it. -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#33322e"/>
+      <stop offset="1" stop-color="#1b1a18"/>
+    </linearGradient>
+    <linearGradient id="clay" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e48a69"/>
+      <stop offset="1" stop-color="#d06d4d"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#plate)"/>
+  <rect x="102" y="102" width="820" height="820" rx="184" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="4"/>
+
+  <!-- live pane -->
+  <rect x="262" y="262" width="303" height="303" rx="68" fill="url(#clay)"/>
+  <path d="M344 360 L418 413 L344 466" fill="none" stroke="#1f1e1d" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M452 470 H500" stroke="#1f1e1d" stroke-width="42" stroke-linecap="round"/>
+
+  <!-- side pane -->
+  <rect x="627" y="272" width="125" height="283" rx="46" fill="#faf9f5" fill-opacity="0.06" stroke="#faf9f5" stroke-opacity="0.82" stroke-width="20"/>
+  <path d="M665 340 H714 M665 385 H700" stroke="#faf9f5" stroke-opacity="0.35" stroke-width="18" stroke-linecap="round"/>
+  <!-- bottom pane -->
+  <rect x="272" y="627" width="480" height="125" rx="46" fill="#faf9f5" fill-opacity="0.06" stroke="#faf9f5" stroke-opacity="0.82" stroke-width="20"/>
+  <circle cx="340" cy="689.5" r="17" fill="#d97757"/>
+  <path d="M384 689.5 H540" stroke="#faf9f5" stroke-opacity="0.35" stroke-width="18" stroke-linecap="round"/>
+</svg>
