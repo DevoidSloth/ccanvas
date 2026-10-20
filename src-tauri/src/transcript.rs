@@ -193,7 +193,10 @@ impl Tracked {
         let reply = self.reply.join("\n\n");
         Summary {
             version: self.offset,
-            context: self.context.clone().map(|c| Context { peak: self.peak, ..c }),
+            context: self.context.clone().map(|c| Context {
+                peak: self.peak,
+                ..c
+            }),
             custom_title: self.custom_title.clone(),
             ai_title: self.ai_title.clone(),
             last_reply: (!reply.is_empty()).then_some(reply),
@@ -212,7 +215,12 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, Arc<Mutex<Tracked>>>> {
 pub async fn transcript_summary(path: String) -> Option<Summary> {
     tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(path);
-        let tracked = cache().lock().unwrap().entry(path.clone()).or_default().clone();
+        let tracked = cache()
+            .lock()
+            .unwrap()
+            .entry(path.clone())
+            .or_default()
+            .clone();
         let mut t = tracked.lock().unwrap();
         t.update(&path).ok()?;
         Some(t.summary())

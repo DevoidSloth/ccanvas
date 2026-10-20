@@ -48,7 +48,12 @@ fn status(s: &str) -> PlanUsage {
 fn read_credentials() -> Option<Value> {
     let raw = if cfg!(target_os = "macos") {
         let out = Command::new("security")
-            .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+            .args([
+                "find-generic-password",
+                "-s",
+                "Claude Code-credentials",
+                "-w",
+            ])
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -56,7 +61,8 @@ fn read_credentials() -> Option<Value> {
         String::from_utf8(out.stdout).ok()?
     } else {
         let home = std::env::var_os("HOME")?;
-        std::fs::read_to_string(std::path::Path::new(&home).join(".claude/.credentials.json")).ok()?
+        std::fs::read_to_string(std::path::Path::new(&home).join(".claude/.credentials.json"))
+            .ok()?
     };
     serde_json::from_str(raw.trim()).ok()
 }
@@ -99,7 +105,10 @@ fn limit(v: &Value, key: &str, kind: &str) -> Option<Limit> {
     Some(Limit {
         kind: kind.into(),
         percent,
-        reset_ms: w.get("resets_at").and_then(Value::as_str).and_then(parse_iso_ms),
+        reset_ms: w
+            .get("resets_at")
+            .and_then(Value::as_str)
+            .and_then(parse_iso_ms),
     })
 }
 
@@ -132,7 +141,11 @@ fn plan_usage() -> PlanUsage {
     };
     // an API error body (e.g. revoked token) has no usage windows
     if body.get("five_hour").is_none() && body.get("seven_day").is_none() {
-        return status(if body.get("error").is_some() { "expired" } else { "error" });
+        return status(if body.get("error").is_some() {
+            "expired"
+        } else {
+            "error"
+        });
     }
     let limits = [
         ("five_hour", "session"),

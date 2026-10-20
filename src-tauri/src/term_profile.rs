@@ -34,7 +34,11 @@ fn home() -> Option<PathBuf> {
 /// `{"Red Component": 0.1, …}` → `#rrggbb`
 fn color(dict: &Dictionary) -> Option<String> {
     let c = |k: &str| dict.get(k).and_then(Value::as_real);
-    let (r, g, b) = (c("Red Component")?, c("Green Component")?, c("Blue Component")?);
+    let (r, g, b) = (
+        c("Red Component")?,
+        c("Green Component")?,
+        c("Blue Component")?,
+    );
     let px = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     Some(format!("#{:02x}{:02x}{:02x}", px(r), px(g), px(b)))
 }
@@ -68,7 +72,10 @@ fn iterm_profile() -> Option<TermProfile> {
     out.line_height = profile.get("Vertical Spacing").and_then(Value::as_real);
     // iTerm2: 0 underline, 1 vertical bar, 2 box (the default when unset)
     out.cursor_style = Some(
-        match profile.get("Cursor Type").and_then(Value::as_signed_integer) {
+        match profile
+            .get("Cursor Type")
+            .and_then(Value::as_signed_integer)
+        {
             Some(0) => "underline",
             Some(1) => "bar",
             _ => "block",
@@ -86,14 +93,31 @@ fn iterm_profile() -> Option<TermProfile> {
         .unwrap_or(false);
     let lookup = |key: &str| {
         let dark = format!("{key} (Dark)");
-        let v = if split { profile.get(&dark).or_else(|| profile.get(key)) } else { profile.get(key) };
+        let v = if split {
+            profile.get(&dark).or_else(|| profile.get(key))
+        } else {
+            profile.get(key)
+        };
         v.and_then(Value::as_dictionary).and_then(color)
     };
 
     const ANSI: [&str; 16] = [
-        "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-        "brightBlack", "brightRed", "brightGreen", "brightYellow",
-        "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
+        "black",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan",
+        "white",
+        "brightBlack",
+        "brightRed",
+        "brightGreen",
+        "brightYellow",
+        "brightBlue",
+        "brightMagenta",
+        "brightCyan",
+        "brightWhite",
     ];
     let named = [
         ("background", "Background Color"),
@@ -134,6 +158,11 @@ pub fn system_lang() -> Option<String> {
     let path = home()?.join("Library/Preferences/.GlobalPreferences.plist");
     let root = Value::from_file(path).ok()?.into_dictionary()?;
     // "en_US" or "en_US@rg=…"; drop any modifiers
-    let locale = root.get("AppleLocale")?.as_string()?.split('@').next()?.to_string();
+    let locale = root
+        .get("AppleLocale")?
+        .as_string()?
+        .split('@')
+        .next()?
+        .to_string();
     (!locale.is_empty()).then(|| format!("{locale}.UTF-8"))
 }

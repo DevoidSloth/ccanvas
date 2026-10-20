@@ -67,11 +67,7 @@ fn install_menu(app: &tauri::App) -> tauri::Result<()> {
         );
     }
     let menu = menu
-        .item(
-            &SubmenuBuilder::new(app, "File")
-                .item(&close)
-                .build()?,
-        )
+        .item(&SubmenuBuilder::new(app, "File").item(&close).build()?)
         .item(
             &SubmenuBuilder::new(app, "Edit")
                 .undo()

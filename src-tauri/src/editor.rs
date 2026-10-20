@@ -66,7 +66,10 @@ fn kill_tree(child: &mut Child) {
 /// ask the login shell first, then fall back to the usual install locations.
 fn code_binary() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    if let Ok(out) = Command::new(&shell).args(["-lc", "command -v code"]).output() {
+    if let Ok(out) = Command::new(&shell)
+        .args(["-lc", "command -v code"])
+        .output()
+    {
         let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !path.is_empty() && std::path::Path::new(&path).exists() {
             return Some(path);
@@ -136,7 +139,11 @@ fn read_head(s: &mut TcpStream) -> Option<(String, Vec<u8>)> {
 }
 
 fn header_name(line: &str) -> String {
-    line.split(':').next().unwrap_or("").trim().to_ascii_lowercase()
+    line.split(':')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
 }
 
 /// Settings defaults for the embedded workbench, so it matches the dark canvas.
@@ -157,9 +164,13 @@ fn with_defaults(html: &str) -> String {
 }
 
 fn proxy_conn(mut client: TcpStream, upstream: u16, secret: Arc<Mutex<Option<String>>>) {
-    let Some((head, rest)) = read_head(&mut client) else { return };
+    let Some((head, rest)) = read_head(&mut client) else {
+        return;
+    };
     let mut lines = head.split("\r\n").filter(|l| !l.is_empty());
-    let Some(request_line) = lines.next() else { return };
+    let Some(request_line) = lines.next() else {
+        return;
+    };
     let headers: Vec<&str> = lines.collect();
     let upgrade = headers.iter().any(|h| header_name(h) == "upgrade");
 
@@ -195,7 +206,9 @@ fn proxy_conn(mut client: TcpStream, upstream: u16, secret: Arc<Mutex<Option<Str
     }
     out.push_str("\r\n");
 
-    let Ok(mut up) = TcpStream::connect(("127.0.0.1", upstream)) else { return };
+    let Ok(mut up) = TcpStream::connect(("127.0.0.1", upstream)) else {
+        return;
+    };
     if up.write_all(out.as_bytes()).is_err() || up.write_all(&rest).is_err() {
         return;
     }
@@ -226,7 +239,7 @@ fn proxy_conn(mut client: TcpStream, upstream: u16, secret: Arc<Mutex<Option<Str
                 continue;
             }
             if name == "set-cookie" {
-                let value = line.splitn(2, ':').nth(1).unwrap_or("").trim();
+                let value = line.split_once(':').map_or("", |(_, v)| v).trim();
                 if value.starts_with(SECRET_COOKIE) {
                     let pair = value.split(';').next().unwrap_or("").to_string();
                     *secret.lock().unwrap() = Some(pair);
@@ -347,7 +360,12 @@ pub fn code_serve(dir: String) -> Result<CodeServer, String> {
             };
             servers().lock().unwrap().insert(
                 dir.clone(),
-                Server { upstream, proxy, stop, child },
+                Server {
+                    upstream,
+                    proxy,
+                    stop,
+                    child,
+                },
             );
             return Ok(CodeServer {
                 url: url_for(proxy, &dir),
@@ -372,7 +390,7 @@ pub fn code_stop(dir: String) {
 /// Kill every server — called when the app exits so none are left orphaned.
 pub fn stop_all() {
     if let Ok(mut map) = servers().lock() {
-        for (_, s) in map.iter_mut() {
+        for s in map.values_mut() {
             s.kill();
         }
         map.clear();
