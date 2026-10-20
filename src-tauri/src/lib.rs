@@ -5,6 +5,7 @@ mod media;
 mod plan_usage;
 mod pty;
 mod term_profile;
+mod transcript;
 mod usage;
 mod watch;
 
@@ -138,6 +139,7 @@ pub fn run() {
             files::home_dir,
             media::media_info,
             usage::claude_usage,
+            transcript::transcript_summary,
             plan_usage::claude_plan_usage,
             pty::pty_open,
             pty::pty_start,

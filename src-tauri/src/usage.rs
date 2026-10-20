@@ -2,13 +2,21 @@
 // ~/.claude/projects/**/*.jsonl. Each assistant line carries a `message.usage`
 // block + an ISO `timestamp`; we sum tokens into the active 5-hour rate-limit
 // window (and the last 24h) the same way `ccusage` does.
+//
+// The recent transcripts add up to hundreds of MB, so each file's usage lines
+// are cached between scans and a scan parses only what was appended since.
 
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
+
+use crate::transcript::{as_text, read_appended};
 
 const FIVE_H_MS: i64 = 5 * 3600 * 1000;
 const HOUR_MS: i64 = 3600 * 1000;
@@ -90,28 +98,33 @@ fn recent_jsonl(dir: &Path, cutoff: i64, out: &mut Vec<PathBuf>) {
     }
 }
 
-#[tauri::command]
-pub fn claude_usage(app: AppHandle) -> ClaudeUsage {
-    let Ok(home) = app.path().home_dir() else {
-        return ClaudeUsage::default();
-    };
-    let root = home.join(".claude").join("projects");
-    let now = now_ms();
-    // only files touched recently can hold entries inside our windows
-    let cutoff = now - 25 * HOUR_MS;
+/// One usage line of a transcript.
+struct UsageLine {
+    /// epoch ms (None when the line has no readable timestamp)
+    ts: Option<i64>,
+    tokens: u64,
+    /// hash of the message id + request id (None when the line has no id)
+    key: Option<u64>,
+}
 
-    let mut files = Vec::new();
-    recent_jsonl(&root, cutoff, &mut files);
+/// A transcript's usage lines so far, and the byte offset they were read up to.
+#[derive(Default)]
+struct FileUsage {
+    offset: u64,
+    lines: Vec<UsageLine>,
+}
 
-    let mut entries: Vec<(i64, u64)> = Vec::new();
-    // Claude Code writes one line per content block of a reply, each repeating
-    // the same message id + usage; count each API response once
-    let mut seen: HashSet<String> = HashSet::new();
-    for fp in files {
-        let Ok(content) = fs::read_to_string(&fp) else {
-            continue;
+impl FileUsage {
+    fn update(&mut self, path: &Path) -> std::io::Result<()> {
+        let (bytes, next) = match read_appended(path, self.offset)? {
+            Some(r) => r,
+            // rewritten rather than appended to: start over
+            None => {
+                *self = Self::default();
+                read_appended(path, 0)?.unwrap_or_default()
+            }
         };
-        for line in content.lines() {
+        for line in as_text(&bytes).lines() {
             if !line.contains("\"usage\"") {
                 continue;
             }
@@ -122,28 +135,78 @@ pub fn claude_usage(app: AppHandle) -> ClaudeUsage {
             if u.is_null() {
                 continue;
             }
-            if let Some(id) = v["message"]["id"].as_str() {
-                let key = format!("{id}:{}", v["requestId"].as_str().unwrap_or(""));
+            let key = v["message"]["id"].as_str().map(|id| {
+                let mut h = DefaultHasher::new();
+                (id, v["requestId"].as_str().unwrap_or("")).hash(&mut h);
+                h.finish()
+            });
+            // count new work (input + output + cache writes); cache *reads* are
+            // cheap and re-counted every turn, so excluding them keeps the
+            // number a meaningful usage signal
+            let tokens = u["input_tokens"].as_u64().unwrap_or(0)
+                + u["output_tokens"].as_u64().unwrap_or(0)
+                + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+            let ts = v["timestamp"].as_str().and_then(parse_iso_ms);
+            self.lines.push(UsageLine { ts, tokens, key });
+        }
+        self.offset = next;
+        Ok(())
+    }
+}
+
+fn cache() -> &'static Mutex<HashMap<PathBuf, FileUsage>> {
+    static C: OnceLock<Mutex<HashMap<PathBuf, FileUsage>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[tauri::command]
+pub async fn claude_usage(app: AppHandle) -> ClaudeUsage {
+    let Ok(home) = app.path().home_dir() else {
+        return ClaudeUsage::default();
+    };
+    let root = home.join(".claude").join("projects");
+    tauri::async_runtime::spawn_blocking(move || usage(&root))
+        .await
+        .unwrap_or_default()
+}
+
+fn usage(root: &Path) -> ClaudeUsage {
+    let now = now_ms();
+    // only files touched recently can hold entries inside our windows
+    let cutoff = now - 25 * HOUR_MS;
+
+    let mut files = Vec::new();
+    recent_jsonl(root, cutoff, &mut files);
+
+    let mut cache = cache().lock().unwrap();
+    // forget transcripts that have gone quiet for longer than the window
+    let recent: HashSet<&PathBuf> = files.iter().collect();
+    cache.retain(|p, _| recent.contains(p));
+
+    let mut entries: Vec<(i64, u64)> = Vec::new();
+    // Claude Code writes one line per content block of a reply, each repeating
+    // the same message id + usage; count each API response once
+    let mut seen: HashSet<u64> = HashSet::new();
+    for fp in &files {
+        let file = cache.entry(fp.clone()).or_default();
+        if file.update(fp).is_err() {
+            continue;
+        }
+        for l in &file.lines {
+            if let Some(key) = l.key {
                 if !seen.insert(key) {
                     continue;
                 }
             }
-            // count new work (input + output + cache writes); cache *reads* are
-            // cheap and re-counted every turn, so excluding them keeps the
-            // number a meaningful usage signal
-            let tok = u["input_tokens"].as_u64().unwrap_or(0)
-                + u["output_tokens"].as_u64().unwrap_or(0)
-                + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-            if tok == 0 {
+            if l.tokens == 0 {
                 continue;
             }
-            if let Some(ts) = v["timestamp"].as_str().and_then(parse_iso_ms) {
-                if ts >= cutoff {
-                    entries.push((ts, tok));
-                }
+            if let Some(ts) = l.ts.filter(|&ts| ts >= cutoff) {
+                entries.push((ts, l.tokens));
             }
         }
     }
+    drop(cache);
 
     if entries.is_empty() {
         return ClaudeUsage::default();

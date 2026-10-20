@@ -7,9 +7,13 @@
 // agent-tracking camera.
 //
 // This module is the single home for that logic; flow.ts piping and the live
-// features all share it.
+// features all share it. The one exception: on the desktop app the live
+// summary (context, names, last reply) is computed by src-tauri/src/transcript.rs,
+// which mirrors extractContext, extractSessionTitles and extractLastAssistant —
+// keep the two in step.
 
-import { defaultDir, readFile, joinPath } from './backend'
+import { invoke } from '@tauri-apps/api/core'
+import { defaultDir, readFile, joinPath, isTauri } from './backend'
 
 // ---------- transcript location ----------
 
@@ -285,5 +289,100 @@ export function extractSessionTitles(jsonl: string): { custom: string | null; ai
   return {
     custom: lastStringField(jsonl, 'custom-title', 'customTitle'),
     ai: lastStringField(jsonl, 'ai-title', 'aiTitle'),
+  }
+}
+
+// ---------- live summary (context meter, names, last reply) ----------
+
+export type TranscriptSummary = {
+  /** how much of the transcript has been read; changes when new events land */
+  version: number
+  context: ContextUsage | null
+  /** newest `/rename` (custom-title) */
+  customTitle: string | null
+  /** the name Claude generated for the session (ai-title) */
+  aiTitle: string | null
+  /** text of the latest turn's assistant replies */
+  lastReply: string | null
+}
+
+/** Summarize an agent's transcript (null when unavailable). The desktop
+ *  backend keeps its place in each file and parses only what was appended
+ *  since the last call; the web bridge has no such command, so the browser
+ *  build reads and parses the whole file. */
+export async function readTranscriptSummary(
+  cwd: string | undefined,
+  sessionId: string | undefined,
+): Promise<TranscriptSummary | null> {
+  const path = await transcriptPathFor(cwd, sessionId)
+  if (!path) return null
+  if (isTauri()) {
+    try {
+      return await invoke<TranscriptSummary | null>('transcript_summary', { path })
+    } catch {
+      return null
+    }
+  }
+  const jsonl = await readFile(path)
+  if (jsonl == null) return null
+  const { custom, ai } = extractSessionTitles(jsonl)
+  return {
+    version: jsonl.length,
+    context: extractContext(jsonl),
+    customTitle: custom,
+    aiTitle: ai,
+    lastReply: extractLastAssistant(jsonl),
+  }
+}
+
+// Every agent widget keeps its title in sync and shows a context meter, and the
+// roster shows each agent's last reply. They all subscribe here, so each
+// transcript is polled once however many readers it has.
+
+const SUMMARY_POLL_MS = 3000
+
+type SummaryWatch = {
+  subs: Set<(s: TranscriptSummary | null) => void>
+  last: TranscriptSummary | null
+  timer: ReturnType<typeof setInterval>
+}
+const summaryWatches = new Map<string, SummaryWatch>()
+
+/** Call `cb` with the transcript's summary as soon as it's known and again on
+ *  every poll. The object is reused while nothing new was written, so readers
+ *  can compare by identity. Returns an unsubscribe function. */
+export function watchTranscriptSummary(
+  cwd: string | undefined,
+  sessionId: string | undefined,
+  cb: (s: TranscriptSummary | null) => void,
+): () => void {
+  if (!cwd || !sessionId) return () => {}
+  const key = `${cwd}\n${sessionId}`
+  let w = summaryWatches.get(key)
+  if (w) {
+    if (w.last) cb(w.last)
+  } else {
+    let busy = false
+    const poll = async () => {
+      if (busy) return
+      busy = true
+      const next = await readTranscriptSummary(cwd, sessionId).finally(() => (busy = false))
+      const cur = summaryWatches.get(key)
+      if (!cur || cur.timer !== timer) return // stopped while reading
+      if (!next || !cur.last || next.version !== cur.last.version) cur.last = next
+      for (const f of cur.subs) f(cur.last)
+    }
+    const timer = setInterval(poll, SUMMARY_POLL_MS)
+    w = { subs: new Set(), last: null, timer }
+    summaryWatches.set(key, w)
+    void poll()
+  }
+  const watch = w
+  watch.subs.add(cb)
+  return () => {
+    watch.subs.delete(cb)
+    if (watch.subs.size) return
+    clearInterval(watch.timer)
+    summaryWatches.delete(key)
   }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { viewCenter } from '../lib/view'
 import { useStore } from '../store/workspace'
 import { useAgents, useDisplayStatus, sendPrompt } from '../lib/agents'
-import { readTranscript, extractLastAssistant } from '../lib/transcript'
+import { watchTranscriptSummary } from '../lib/transcript'
 import type { WidgetElement, Workspace } from '../lib/types'
 import { IconClose, IconBroadcast } from './icons'
 import '../styles/agent-tools.css'
@@ -10,38 +10,30 @@ import '../styles/agent-tools.css'
 
 type Row = { agent: WidgetElement; tab: Workspace }
 
-const MESSAGE_POLL_MS = 6000
-
 /** Each agent's latest reply, read from its session transcript. The terminal
  *  tail is full of TUI chrome (spinners, hints, box drawing), so it isn't used. */
 function useLastMessages(rows: Row[]): Record<string, string> {
   const [msgs, setMsgs] = useState<Record<string, string>>({})
   const key = rows.map((r) => `${r.agent.id}:${r.agent.cwd}:${r.agent.sessionId}`).join('|')
   useEffect(() => {
-    let alive = true
-    const poll = async () => {
-      const next: Record<string, string> = {}
-      await Promise.all(
-        rows.map(async ({ agent }) => {
-          const jsonl = await readTranscript(agent.cwd, agent.sessionId)
-          const text = jsonl && extractLastAssistant(jsonl)
-          if (!text) return
-          // one readable line: first non-empty line, markdown markers dropped
-          const line = text
-            .split('\n')
-            .map((l) => l.replace(/^[#>*\-\s`]+/, '').trim())
-            .find(Boolean)
-          if (line) next[agent.id] = line.slice(0, 160)
-        }),
-      )
-      if (alive) setMsgs(next)
-    }
-    void poll()
-    const id = setInterval(poll, MESSAGE_POLL_MS)
-    return () => {
-      alive = false
-      clearInterval(id)
-    }
+    const offs = rows.map(({ agent }) =>
+      watchTranscriptSummary(agent.cwd, agent.sessionId, (summary) => {
+        // one readable line: first non-empty line, markdown markers dropped
+        const line = summary?.lastReply
+          ?.split('\n')
+          .map((l) => l.replace(/^[#>*\-\s`]+/, '').trim())
+          .find(Boolean)
+          ?.slice(0, 160)
+        setMsgs((m) => {
+          if (m[agent.id] === line) return m
+          const next = { ...m }
+          if (line) next[agent.id] = line
+          else delete next[agent.id]
+          return next
+        })
+      }),
+    )
+    return () => offs.forEach((off) => off())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
   return msgs

@@ -80,11 +80,26 @@ pub struct DirEntry {
     mtime: Option<u64>,
 }
 
+/// Run blocking work (disk reads, child processes) on the blocking thread
+/// pool. Sync commands run on the main thread, where a slow read or `git` call
+/// freezes the UI and queues every terminal keystroke behind it.
+async fn off_main<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// List a directory's immediate children (dirs first, then files, A→Z).
 /// Hidden dotfiles are kept but sorted after visible ones within each group.
 #[tauri::command]
-pub fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
-    let mut entries: Vec<DirEntry> = std::fs::read_dir(&path)
+pub async fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
+    off_main(move || dir_entries(&path)).await
+}
+
+fn dir_entries(path: &str) -> Result<Vec<DirEntry>, String> {
+    let mut entries: Vec<DirEntry> = std::fs::read_dir(path)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .map(|e| {
@@ -129,13 +144,17 @@ pub struct CmdOut {
 /// Run a command (program + args) in `cwd`, capturing output. Used by the git
 /// diff / log widgets. Not a shell — args are passed verbatim, no expansion.
 #[tauri::command]
-pub fn run_command(
+pub async fn run_command(
     program: String,
     args: Vec<String>,
     cwd: Option<String>,
 ) -> Result<CmdOut, String> {
-    let mut cmd = std::process::Command::new(&program);
-    cmd.args(&args);
+    off_main(move || run(&program, &args, cwd)).await
+}
+
+fn run(program: &str, args: &[String], cwd: Option<String>) -> Result<CmdOut, String> {
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args);
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
         cmd.current_dir(dir);
     }
@@ -148,20 +167,25 @@ pub fn run_command(
 }
 
 #[tauri::command]
-pub fn read_text(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+pub async fn read_text(path: String) -> Result<String, String> {
+    off_main(move || std::fs::read_to_string(&path).map_err(|e| e.to_string())).await
 }
 
 /// Read a file's raw bytes, base64-encoded for transport over the IPC bridge.
 /// Used by the data widget (parquet/hdf5) and plot widget (images) which need
 /// binary content that `read_text` can't carry.
 #[tauri::command]
-pub fn read_bytes(path: String) -> Result<String, String> {
+pub async fn read_bytes(path: String) -> Result<String, String> {
     use base64::Engine;
-    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    off_main(move || {
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    })
+    .await
 }
 
+/// Kept sync: main-thread commands run in the order they were sent, so two
+/// quick saves of the same file can't land out of order.
 #[tauri::command]
 pub fn write_text(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())

@@ -10,21 +10,18 @@
 import { useEffect } from 'react'
 import { useStore } from '../store/workspace'
 import type { WidgetElement } from './types'
-import { readTranscript, extractSessionTitles } from './transcript'
+import { watchTranscriptSummary } from './transcript'
 
-const POLL_MS = 3000
 const DEFAULT_TITLE = 'claude agent'
 
 export function useSyncSessionTitle(el: WidgetElement) {
   const { id, kind, cwd, sessionId } = el
   useEffect(() => {
     if (kind !== 'agent' || !cwd || !sessionId) return
-    let alive = true
     let seenCustom: string | null | undefined // undefined = not read yet
-    const poll = async () => {
-      const jsonl = await readTranscript(cwd, sessionId)
-      if (!alive || jsonl == null) return
-      const { custom, ai } = extractSessionTitles(jsonl)
+    return watchTranscriptSummary(cwd, sessionId, (summary) => {
+      if (!summary) return
+      const { customTitle: custom, aiTitle: ai } = summary
       const renamed = seenCustom !== undefined && custom !== seenCustom
       seenCustom = custom
 
@@ -38,12 +35,6 @@ export function useSyncSessionTitle(el: WidgetElement) {
       s.mutateElement(id, (w) => {
         ;(w as WidgetElement).title = next
       })
-    }
-    void poll()
-    const timer = setInterval(poll, POLL_MS)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
+    })
   }, [id, kind, cwd, sessionId])
 }
