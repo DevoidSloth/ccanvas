@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/update/:target/:arch/:version",
+      "destination": "/api/update?target=:target&arch=:arch&version=:version"
+    }
+  ]
+}

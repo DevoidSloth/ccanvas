@@ -83,6 +83,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater bundles; tauri-action then attaches them and a
+          # latest.json manifest to the release, which the update server
+          # (update-server/, on Vercel) serves to installed apps.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Bundling the Monaco + hdf5 wasm chunks OOMs Node's default heap on
           # the ~7 GB macOS runner; raise it so `npm run build` doesn't crash.
           NODE_OPTIONS: --max-old-space-size=6144
@@ -95,4 +100,6 @@ jobs:
           releaseName: 'ccanvas __VERSION__'
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}
+          # tauri.release.conf.json turns on the signed updater bundles; it's
+          # kept out of tauri.conf.json so local builds don't need the key
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json

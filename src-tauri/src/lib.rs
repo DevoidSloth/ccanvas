@@ -116,6 +116,14 @@ pub fn run() {
             // start the embedded media server (range streaming + ffmpeg
             // transcode) so the desktop app plays video with no external backend
             media::start();
+            // self-update from GitHub releases via the ccanvas update server
+            // (endpoint + public key in tauri.conf.json → plugins.updater)
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
             install_menu(app)?;
             Ok(())
         })

@@ -27,6 +27,7 @@ import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
 import { useTerminalFileDrop } from './lib/fileDrop'
 import { SettingsPanel } from './ui/SettingsPanel'
+import { UpdateBanner } from './ui/UpdateBanner'
 import { inEmacs } from './lib/terminal'
 import {
   useSettings,
@@ -419,6 +420,7 @@ export default function App() {
         {openPanel === 'checkpoints' && <Checkpoints />}
         {openPanel === 'memory' && <MemoryPanel />}
         {openPanel === 'settings' && <SettingsPanel />}
+        <UpdateBanner />
       </main>
       <Minibuffer />
       <ContextMenuHost />

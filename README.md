@@ -109,6 +109,10 @@ xattr -cr /Applications/ccanvas.app
 
 You only need to do this once per download.
 
+**Updates:** from 2.2.0 on, the desktop app checks for new releases on launch
+(and every few hours), downloads them in the background, and offers *Restart
+to update* once one is ready. Versions before 2.2.0 need one manual install.
+
 ### Build the desktop app (Tauri)
 
 ```bash

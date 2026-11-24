@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.4.0",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "h5wasm": "^0.10.2",

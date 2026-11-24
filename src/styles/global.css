@@ -5537,3 +5537,56 @@ body.is-panning * {
   background: var(--accent-soft);
   color: var(--accent-bright);
 }
+
+/* ---------- update-ready card ---------- */
+.upd {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 40;
+  width: 280px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  font-size: 12.5px;
+}
+.upd__title {
+  font-weight: 600;
+}
+.upd__hint {
+  margin-top: 4px;
+  color: var(--ink-faint);
+  line-height: 1.4;
+}
+.upd__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+.upd__btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--ink-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.upd__btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line-hard);
+}
+.upd__btn--primary {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.upd__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

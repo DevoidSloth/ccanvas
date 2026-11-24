@@ -1,12 +1,16 @@
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { bootstrap } from './store/workspace'
+import { startUpdateChecks } from './lib/updater'
 import './styles/global.css'
 import '@xterm/xterm/css/xterm.css'
 
 // Restore the previous session (or open a fresh tab) and start autosave
 // before the first render so the store always has an active workspace.
 bootstrap()
+
+// desktop builds: look for a newer signed release in the background
+startUpdateChecks()
 
 // NOTE: no <React.StrictMode> — terminal/agent widgets spawn real PTYs and
 // launch `claude` in mount effects, and StrictMode's double-invoke would

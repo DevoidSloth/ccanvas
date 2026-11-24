@@ -1,0 +1,6 @@
+{
+  "name": "ccanvas-update-server",
+  "private": true,
+  "type": "module",
+  "description": "Tauri update endpoint for ccanvas, deployed to Vercel"
+}
