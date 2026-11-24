@@ -6,8 +6,8 @@ import type { WidgetElement } from '../lib/types'
 import { claudeColorName } from '../lib/types'
 import { connectPty, type Term } from '../lib/terminal'
 import { useStore, selectActive } from '../store/workspace'
-import { findFilePaths, widgetKindForFile } from '../lib/filetypes'
-import { resolvePath, baseName } from '../lib/backend'
+import { findFilePaths, findUrls, widgetKindForFile } from '../lib/filetypes'
+import { resolvePath, baseName, openExternal } from '../lib/backend'
 import {
   useAgents,
   registerTransport,
@@ -151,6 +151,12 @@ export function TerminalBody({
       drawBoldTextInBrightColors: profile?.boldIsBright ?? true,
       allowProposedApi: true,
       theme: { ...DEFAULT_THEME, ...profile?.theme },
+      // OSC 8 hyperlinks (Claude Code prints its links this way): same rules
+      // as plain URLs below, instead of xterm's default confirm() + new window
+      linkHandler: {
+        activate: (ev, text) => onUrlClick(ev, text),
+        allowNonHttpProtocols: false,
+      },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -195,6 +201,47 @@ export function TerminalBody({
       )
     }
 
+    // ---- clickable URLs ----
+    // Double-click a link to open it in a ccanvas web widget beside this
+    // terminal (a single click is left alone so selecting text still works);
+    // ⌘/Ctrl-click opens it in the system browser instead.
+    const openUrlInCanvas = (url: string) => {
+      const store = useStore.getState()
+      const ws = store.active()
+      if (!ws) return
+      const self =
+        (ws.elements.find((e) => e.id === el.id) as WidgetElement | undefined) ?? el
+      const existing = ws.elements.find(
+        (e): e is WidgetElement => e.type === 'widget' && e.kind === 'web' && e.url === url,
+      )
+      if (existing) {
+        store.setSelection([existing.id])
+        store.bringToFront([existing.id])
+        store.setActiveWidget(existing.id)
+        return
+      }
+      let title = url
+      try {
+        title = new URL(url).host
+      } catch {
+        /* keep the raw url */
+      }
+      const n = openCountRef.current++
+      const w = 960
+      const h = 680
+      store.spawnWidget(
+        'web',
+        self.x + self.w + 40 + w / 2 + (n % 5) * 30,
+        self.y + h / 2 + (n % 5) * 30,
+        { url, title, w, h },
+      )
+    }
+    function onUrlClick(ev: MouseEvent, url: string) {
+      if (!/^https?:\/\//i.test(url)) return
+      if (ev.metaKey || ev.ctrlKey) void openExternal(url)
+      else if (ev.detail >= 2) openUrlInCanvas(url)
+    }
+
     const linkProvider = term.registerLinkProvider({
       provideLinks(bufferLineNumber, callback) {
         const bufLine = term.buffer.active.getLine(bufferLineNumber - 1)
@@ -202,13 +249,37 @@ export function TerminalBody({
           callback(undefined)
           return
         }
-        const matches = findFilePaths(bufLine.translateToString(true))
-        if (!matches.length) {
+        const text = bufLine.translateToString(true)
+        const matches = findFilePaths(text)
+        // URLs: search the whole soft-wrapped line so a long link that wraps
+        // onto the next rows is clickable along its full length
+        const buf = term.buffer.active
+        const cols = term.cols
+        let first = bufferLineNumber - 1
+        while (first > 0 && buf.getLine(first)?.isWrapped) first--
+        let last = bufferLineNumber - 1
+        while (buf.getLine(last + 1)?.isWrapped) last++
+        let joined = ''
+        for (let y = first; y <= last; y++)
+          joined += buf.getLine(y)?.translateToString(y === last) ?? ''
+        // string offset → 1-based cell position (assumes one cell per char)
+        const at = (i: number) => ({ x: (i % cols) + 1, y: first + Math.floor(i / cols) + 1 })
+        const urls = findUrls(joined).filter((u) => {
+          const a = at(u.index).y
+          const b = at(u.index + u.length - 1).y
+          return a <= bufferLineNumber && bufferLineNumber <= b
+        })
+        if (!matches.length && !urls.length) {
           callback(undefined)
           return
         }
-        callback(
-          matches.map((mt) => ({
+        callback([
+          ...urls.map((u) => ({
+            text: u.url,
+            range: { start: at(u.index), end: at(u.index + u.length - 1) },
+            activate: (ev: MouseEvent, url: string) => onUrlClick(ev, url),
+          })),
+          ...matches.map((mt) => ({
             text: mt.path,
             // ranges are 1-based; end.x is the last cell of the link (inclusive)
             range: {
@@ -217,7 +288,7 @@ export function TerminalBody({
             },
             activate: () => openFileFromTerminal(mt.path),
           })),
-        )
+        ])
       },
     })
 

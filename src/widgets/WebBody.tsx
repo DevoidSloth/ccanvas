@@ -62,7 +62,13 @@ export function WebBody({ el, active }: { el: WidgetElement; active: boolean }) 
   // the proxy lives on the Node server (port 7531); probe whether it's running
   useEffect(() => {
     let alive = true
-    void proxyAvailable().then((on) => alive && setCanProxy(on))
+    void proxyAvailable().then((on) => {
+      if (!alive) return
+      setCanProxy(on)
+      // a remote page opened from elsewhere (e.g. a link double-clicked in a
+      // terminal) starts proxied, as if typed in the bar — most sites block framing
+      if (on && el.url && !isLocal(el.url)) setProxied(true)
+    })
     return () => {
       alive = false
     }

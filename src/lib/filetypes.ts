@@ -114,3 +114,33 @@ export function findFilePaths(line: string): PathMatch[] {
   }
   return out
 }
+
+export type UrlMatch = { url: string; index: number; length: number }
+
+const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+/gi
+
+/**
+ * Find every http(s) URL in a single line of (already ANSI-stripped) text.
+ * Trailing punctuation that usually ends a sentence or wraps the link
+ * (`.`, `,`, `)`, `]`, …) is left off, unless the URL opened that bracket.
+ */
+export function findUrls(line: string): UrlMatch[] {
+  const out: UrlMatch[] = []
+  if (!line) return out
+  URL_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = URL_RE.exec(line)) && out.length < 64) {
+    let url = m[0]
+    const count = (c: string) => url.split(c).length - 1
+    const PAIRS: Record<string, string> = { ')': '(', ']': '[', '}': '{' }
+    for (;;) {
+      const last = url[url.length - 1]
+      if (/[.,;:!?'"]/.test(last)) url = url.slice(0, -1)
+      // drop a closing bracket only if it has no partner inside the URL
+      else if (PAIRS[last] && count(last) > count(PAIRS[last])) url = url.slice(0, -1)
+      else break
+    }
+    if (url.length > 'https://'.length) out.push({ url, index: m.index, length: url.length })
+  }
+  return out
+}

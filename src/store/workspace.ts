@@ -781,7 +781,9 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   spawnWidget: (kind, x, y, init) => {
-    const { w, h } = WIDGET_SIZE[kind]
+    // an explicit size in `init` is centred on (x,y) like the default one
+    const w = init?.w ?? WIDGET_SIZE[kind].w
+    const h = init?.h ?? WIDGET_SIZE[kind].h
     const id = newId()
     const dir = get().active()?.dir
     const el: CanvasElement = {
