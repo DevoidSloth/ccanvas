@@ -38,3 +38,5 @@ src-tauri/gen/schemas
 
 # TypeScript build cache
 tsconfig.tsbuildinfo
+.vercel
+.env*
