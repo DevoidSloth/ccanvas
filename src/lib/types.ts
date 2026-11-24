@@ -187,6 +187,8 @@ export type WidgetElement = Base & {
    *  so subsequent opens use `claude --resume <sessionId>` */
   agentStarted?: boolean
   // agent launch config (agent widgets)
+  /** which CLI this agent runs; absent means claude (canvases saved before codex support) */
+  cli?: 'claude' | 'codex'
   model?: string // e.g. "opus", "sonnet"; appended as --model
   agentPrompt?: string // initial prompt typed after launch
   skipPermissions?: boolean // pass --dangerously-skip-permissions
@@ -253,6 +255,7 @@ export type Template = {
     model?: string
     agentPrompt?: string
     skipPermissions?: boolean
+    cli?: 'claude' | 'codex'
   }>
 }
 

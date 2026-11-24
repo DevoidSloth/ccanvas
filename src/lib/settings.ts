@@ -28,6 +28,14 @@ export const PALETTES: { id: PaletteId; name: string; bg: string; panel: string;
   { id: 'mono', name: 'Mono', bg: '#1c1c1c', panel: '#242424', ink: '#f4f4f4', accent: '#c9c9c9' },
 ]
 
+/** Which coding-agent CLI new agent widgets launch. */
+export type AgentCli = 'claude' | 'codex'
+
+export const AGENT_CLIS: { id: AgentCli; name: string; cmd: string }[] = [
+  { id: 'claude', name: 'Claude Code', cmd: 'claude' },
+  { id: 'codex', name: 'Codex', cmd: 'codex' },
+]
+
 export interface Settings {
   /** ⌃X ⌃F opens the tab finder */
   emacsKeys: boolean
@@ -36,6 +44,8 @@ export interface Settings {
   /** extra user-recorded shortcuts that open the tab finder */
   customFinderKeys: KeySeq[]
   palette: PaletteId
+  /** CLI that new agents open with; existing agents keep the one they were made with */
+  agentCli: AgentCli
 }
 
 const DEFAULTS: Settings = {
@@ -43,6 +53,7 @@ const DEFAULTS: Settings = {
   vimKeys: false,
   customFinderKeys: [],
   palette: 'claude',
+  agentCli: 'claude',
 }
 
 function load(): Settings {

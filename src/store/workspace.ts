@@ -38,6 +38,7 @@ import {
 import { resetFlowState } from '../lib/flow'
 import { startTracking, stopTracking } from '../lib/tracker'
 import { killPty } from '../lib/terminal'
+import { useSettings } from '../lib/settings'
 
 let zCounter = 1
 const nextZ = () => zCounter++
@@ -729,7 +730,9 @@ export const useStore = create<Store>((set, get) => ({
         ? { path: dir }
         : {}),
       // agents get a stable claude session id so reopening can --resume it
-      ...(kind === 'agent' ? { sessionId: crypto.randomUUID() } : {}),
+      ...(kind === 'agent'
+        ? { sessionId: crypto.randomUUID(), cli: useSettings.getState().agentCli }
+        : {}),
       ...init,
     }
     get().beginHistory()
@@ -1257,6 +1260,7 @@ export const useStore = create<Store>((set, get) => ({
         model: w.model,
         agentPrompt: w.agentPrompt,
         skipPermissions: w.skipPermissions,
+        cli: w.cli,
       })),
     }
     const templates = [...get().templates, tpl]
@@ -1290,7 +1294,9 @@ export const useStore = create<Store>((set, get) => ({
       ...(w.agentPrompt != null ? { agentPrompt: w.agentPrompt } : {}),
       ...(w.skipPermissions ? { skipPermissions: true } : {}),
       ...(dir ? { cwd: dir } : {}),
-      ...(w.kind === 'agent' ? { sessionId: crypto.randomUUID() } : {}),
+      ...(w.kind === 'agent'
+        ? { sessionId: crypto.randomUUID(), cli: w.cli ?? useSettings.getState().agentCli }
+        : {}),
     }))
     get().beginHistory()
     get().addElements(els)

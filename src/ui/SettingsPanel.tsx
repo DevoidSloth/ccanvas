@@ -3,6 +3,7 @@ import { useStore } from '../store/workspace'
 import {
   useSettings,
   PALETTES,
+  AGENT_CLIS,
   comboFrom,
   formatSeq,
   isModifierKey,
@@ -31,6 +32,27 @@ export function SettingsPanel() {
       </div>
 
       <div className="panel__body set">
+        <div className="set__section">Agents</div>
+        {AGENT_CLIS.map((c) => (
+          <label key={c.id} className="set__row">
+            <input
+              type="radio"
+              name="agent-cli"
+              checked={s.agentCli === c.id}
+              onChange={() => s.update({ agentCli: c.id })}
+            />
+            <span className="set__main">
+              <span className="set__label">
+                {c.name} <kbd className="set__kbd">{c.cmd}</kbd>
+              </span>
+            </span>
+          </label>
+        ))}
+        <div className="set__hint">
+          New agents open with this CLI; existing agents keep the one they started with. Needs{' '}
+          <code>{s.agentCli === 'codex' ? 'codex' : 'claude'}</code> on your PATH.
+        </div>
+
         <div className="set__section">Switch tabs</div>
         <Toggle
           on={s.emacsKeys}

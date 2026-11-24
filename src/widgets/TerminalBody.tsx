@@ -106,6 +106,7 @@ export function TerminalBody({
 
   const mutateElement = useStore((s) => s.mutateElement)
   const isAgent = el.kind === 'agent'
+  const isCodex = isAgent && el.cli === 'codex'
   const cwd = el.cwd || '~'
 
   // command run once the shell is live. Agents launch claude bound to a stable
@@ -114,6 +115,14 @@ export function TerminalBody({
   // (`--session-id`); a reopened agent resumes it (`--resume`). Model and
   // skip-permission flags are appended. Reused by the resume self-heal path.
   const buildAgentLaunch = (sessionId: string | undefined, started: boolean) => {
+    // Codex picks its own session ids, so there's no stable id to pin or
+    // resume: every launch (including a reopen) starts a fresh session.
+    if (isCodex) {
+      const flags: string[] = ['codex']
+      if (el.model) flags.push(`--model ${el.model}`)
+      if (el.skipPermissions) flags.push('--dangerously-bypass-approvals-and-sandbox')
+      return flags.join(' ')
+    }
     const base = sessionId
       ? started
         ? `claude --resume ${sessionId}`
@@ -375,7 +384,7 @@ export function TerminalBody({
     // doesn't exist locally (shared .ccnvs, deleted transcript, or a session
     // that never persisted) claude errors out — we detect that and self-heal
     // into a fresh session instead of leaving a dead agent.
-    const watchSession = isAgent && !!el.sessionId
+    const watchSession = isAgent && !isCodex && !!el.sessionId
     const FAIL_INUSE = /already in use|already exists/i
     const FAIL_MISSING =
       /no conversation found|couldn'?t find (a |the )?(matching )?session|session .*(not found|does not exist|is invalid|was not found)/i
@@ -599,7 +608,8 @@ export function TerminalBody({
           // timing); these fire when Claude is detected ready (see onSettle).
           if (!t.reused) {
             const cn = claudeColorName(el.color)
-            if (el.color && cn !== 'default')
+            // /color is a Claude Code command; codex has no equivalent
+            if (!isCodex && el.color && cn !== 'default')
               launchTasks.push({ data: `/color ${cn}`, enter: true })
             // first launch only: the initial prompt (no \r so you can review it)
             if (!el.agentStarted && el.agentPrompt)

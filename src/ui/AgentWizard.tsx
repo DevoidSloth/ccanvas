@@ -4,6 +4,7 @@ import type { AgentWizardCtx } from '../store/workspace'
 import { AGENT_COLORS, claudeColorName } from '../lib/types'
 import type { WidgetElement } from '../lib/types'
 import { sendTo, isLive } from '../lib/agents'
+import { useSettings } from '../lib/settings'
 import { IconAgent } from './icons'
 
 const MODELS = ['default', 'opus', 'sonnet', 'haiku']
@@ -29,10 +30,15 @@ function Wizard({ ctx }: { ctx: AgentWizardCtx }) {
     ? (ws.elements.find((e) => e.id === ctx.editId) as WidgetElement | undefined)
     : undefined
   const editing = !!existing
+  // an existing agent keeps its CLI; a new one uses the Settings choice
+  const settingsCli = useSettings((s) => s.agentCli)
+  const cli = existing ? (existing.cli ?? 'claude') : settingsCli
+  const codex = cli === 'codex'
+  const defaultTitle = `${cli} agent`
 
   const [name, setName] = useState(existing?.title ?? ctx.title ?? '')
   const [color, setColor] = useState(existing?.color ?? DEFAULT_COLOR)
-  const [model, setModel] = useState(existing?.model ?? ctx.model ?? 'default')
+  const [model, setModel] = useState(existing?.model ?? ctx.model ?? (codex ? '' : 'default'))
   const [skip, setSkip] = useState(existing?.skipPermissions ?? false)
   const [prompt, setPrompt] = useState(existing?.agentPrompt ?? ctx.agentPrompt ?? '')
 
@@ -41,8 +47,8 @@ function Wizard({ ctx }: { ctx: AgentWizardCtx }) {
     : (ctx.cwd ?? ws.dir)?.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
 
   const submit = () => {
-    const title = name.trim() || 'claude agent'
-    const cleanModel = model === 'default' ? undefined : model
+    const title = name.trim() || defaultTitle
+    const cleanModel = model.trim() === '' || model === 'default' ? undefined : model.trim()
     if (editing && existing) {
       beginHistory()
       mutateElement(existing.id, (w) => {
@@ -53,7 +59,8 @@ function Wizard({ ctx }: { ctx: AgentWizardCtx }) {
         a.skipPermissions = skip
         a.agentPrompt = prompt.trim() || undefined
       })
-      if (isLive(existing.id)) {
+      // /rename and /color are Claude Code commands
+      if (!codex && isLive(existing.id)) {
         if (title !== existing.title) sendTo(existing.id, `/rename ${title}\r`)
         sendTo(existing.id, `/color ${claudeColorName(color)}\r`)
       }
@@ -86,7 +93,9 @@ function Wizard({ ctx }: { ctx: AgentWizardCtx }) {
           <span className="wiz__icon" style={{ color }}>
             <IconAgent />
           </span>
-          <span className="wiz__title">{editing ? 'Edit agent' : 'New agent'}</span>
+          <span className="wiz__title">
+            {editing ? 'Edit' : 'New'} {codex ? 'Codex' : 'Claude'} agent
+          </span>
           {folder && <span className="wiz__folder">{folder}</span>}
         </div>
 
@@ -94,7 +103,7 @@ function Wizard({ ctx }: { ctx: AgentWizardCtx }) {
         <input
           className="wiz__input"
           autoFocus
-          placeholder="claude agent"
+          placeholder={defaultTitle}
           value={name}
           spellCheck={false}
           onChange={(e) => setName(e.target.value)}
@@ -117,21 +126,34 @@ function Wizard({ ctx }: { ctx: AgentWizardCtx }) {
         </div>
 
         <label className="wiz__label">Model</label>
-        <div className="wiz__seg">
-          {MODELS.map((m) => (
-            <button
-              key={m}
-              className={`wiz__seg-btn${model === m ? ' wiz__seg-btn--active' : ''}`}
-              onClick={() => setModel(m)}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
+        {codex ? (
+          <input
+            className="wiz__input"
+            placeholder="codex default (e.g. gpt-5-codex)"
+            value={model}
+            spellCheck={false}
+            onChange={(e) => setModel(e.target.value)}
+          />
+        ) : (
+          <div className="wiz__seg">
+            {MODELS.map((m) => (
+              <button
+                key={m}
+                className={`wiz__seg-btn${model === m ? ' wiz__seg-btn--active' : ''}`}
+                onClick={() => setModel(m)}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
 
         <label className="wiz__check">
           <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
-          skip permission prompts <code>--dangerously-skip-permissions</code>
+          skip permission prompts{' '}
+          <code>
+            {codex ? '--dangerously-bypass-approvals-and-sandbox' : '--dangerously-skip-permissions'}
+          </code>
         </label>
 
         <label className="wiz__label">Initial prompt (optional)</label>
