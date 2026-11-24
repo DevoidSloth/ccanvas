@@ -31,6 +31,8 @@ import {
   pickDir,
   pickFile,
   saveFile,
+  listDir,
+  readFile,
   baseName,
   dirName,
   joinPath,
@@ -145,6 +147,41 @@ async function chooseDir(current?: string): Promise<string | null | undefined> {
   )
   if (typed == null) return null // cancelled
   return typed.trim() || undefined
+}
+
+/** The special knowledge-graph tab (see openClaudeWorkspace); never written to disk. */
+const isGraphTab = (t: Workspace) =>
+  t.elements.some((e) => e.type === 'widget' && (e as WidgetElement).kind === 'claude')
+
+/** Where a folder-bound canvas lives on disk. */
+const canvasPath = (t: Workspace) => joinPath(t.dir!, `${t.name}.ccnvs`)
+
+/**
+ * Load the canvas a folder already holds, if any: `<folder-name>.ccnvs` when
+ * present, otherwise the most recently modified `.ccnvs` in it. The tab is
+ * named after the file so autosave writes back to that same file.
+ */
+async function loadCanvasIn(dir: string): Promise<Workspace | null> {
+  if (!(await backendOnline())) return null
+  const files = ((await listDir(dir)) ?? []).filter(
+    (e) => !e.is_dir && /\.ccnvs$/i.test(e.name),
+  )
+  if (!files.length) return null
+  const want = `${baseName(dir)}.ccnvs`.toLowerCase()
+  const file =
+    files.find((f) => f.name.toLowerCase() === want) ??
+    [...files].sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))[0]
+  const text = await readFile(file.path)
+  if (text == null) return null
+  try {
+    const ws = fromFile(JSON.parse(text), file.name)
+    ws.name = file.name.replace(/\.ccnvs$/i, '')
+    ws.dir = dir
+    for (const el of ws.elements) zCounter = Math.max(zCounter, el.z + 1)
+    return ws
+  } catch {
+    return null
+  }
 }
 
 export type AlignMode =
@@ -380,8 +417,18 @@ export const useStore = create<Store>((set, get) => ({
   newTab: async () => {
     const dir = await chooseDir()
     const realDir = dir || undefined
+    if (realDir) {
+      // the folder is already open in a tab → just go there
+      const open = get().tabs.find((t) => t.dir === realDir && !isGraphTab(t))
+      if (open) {
+        set({ activeTabId: open.id, selection: [], activeWidgetId: null })
+        return
+      }
+    }
+    // reopen the canvas saved in that folder, or start a fresh one there
+    const saved = realDir ? await loadCanvasIn(realDir) : null
     const name = realDir ? baseName(realDir) : `untitled-${get().tabs.length + 1}`
-    const ws = makeWorkspace(name, realDir)
+    const ws = saved ?? makeWorkspace(name, realDir)
     set((s) => ({
       tabs: [...s.tabs, ws],
       activeTabId: ws.id,
@@ -440,6 +487,36 @@ export const useStore = create<Store>((set, get) => ({
     const dir = await chooseDir(ws.dir)
     if (dir === null) return // cancelled
     const realDir = dir || undefined
+    if (realDir && realDir !== ws.dir) {
+      const open = get().tabs.find((t) => t.dir === realDir && !isGraphTab(t))
+      if (open) {
+        set({ activeTabId: open.id, selection: [], activeWidgetId: null })
+        return
+      }
+      // the folder already has a canvas → reopen it rather than overwrite it.
+      // An empty tab becomes that canvas; one with work on it is left as is
+      // and the saved canvas opens beside it.
+      const saved = await loadCanvasIn(realDir)
+      if (saved) {
+        const cur = get().active()
+        if (cur && cur.id === ws.id && cur.elements.length === 0) {
+          set((s) => ({
+            tabs: s.tabs.map((t) => (t.id === ws.id ? { ...saved, pinned: t.pinned } : t)),
+            activeTabId: saved.id,
+            selection: [],
+            activeWidgetId: null,
+          }))
+        } else {
+          set((s) => ({
+            tabs: [...s.tabs, saved],
+            activeTabId: saved.id,
+            selection: [],
+            activeWidgetId: null,
+          }))
+        }
+        return
+      }
+    }
     set((s) => ({
       tabs: s.tabs.map((t) => {
         if (t.id !== ws.id) return t
@@ -567,10 +644,7 @@ export const useStore = create<Store>((set, get) => ({
     let ok = false
     // bound to a real folder → write <dir>/<name>.ccnvs via the backend
     if (ws.dir && !forceDialog && (await backendOnline())) {
-      ok = await saveFile(
-        joinPath(ws.dir, `${ws.name}.ccnvs`),
-        JSON.stringify(toFile(ws), null, 2),
-      )
+      ok = await saveFile(canvasPath(ws), JSON.stringify(toFile(ws), null, 2))
     }
     // otherwise (or if that failed) fall back to File System Access / download
     if (!ok) ok = await fsSave(ws, forceDialog)
@@ -1439,10 +1513,38 @@ export function bootstrap() {
   }
 
   let t: ReturnType<typeof setTimeout> | null = null
+  let disk: ReturnType<typeof setTimeout> | null = null
   useStore.subscribe((s) => {
     if (t) clearTimeout(t)
     t = setTimeout(() => {
       saveSession({ tabs: s.tabs, activeTabId: s.activeTabId })
     }, 400)
+    if (disk) clearTimeout(disk)
+    disk = setTimeout(() => void autosaveToDisk(), 1500)
   })
+}
+
+// Write every folder-bound canvas with unsaved changes to <dir>/<name>.ccnvs,
+// so the folder always holds its canvas and reopening the folder restores it.
+let autosaving = false
+async function autosaveToDisk() {
+  if (autosaving) return
+  const pending = useStore
+    .getState()
+    .tabs.filter((t) => t.dir && t.dirty && !isGraphTab(t))
+  if (!pending.length || !(await backendOnline())) return
+  autosaving = true
+  try {
+    for (const tab of pending) {
+      const ok = await saveFile(canvasPath(tab), JSON.stringify(toFile(tab), null, 2))
+      // clear dirty only if nothing changed while writing (tabs are replaced
+      // on every edit, so identity tells us); otherwise the next pass saves it
+      if (ok)
+        useStore.setState((s) => ({
+          tabs: s.tabs.map((x) => (x === tab ? { ...x, dirty: false } : x)),
+        }))
+    }
+  } finally {
+    autosaving = false
+  }
 }
