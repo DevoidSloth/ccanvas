@@ -4,7 +4,7 @@
 
 <p></p>
 
-[![Release](https://img.shields.io/badge/release-v2.1.0-d97757?style=flat-square&labelColor=1f1e1d)](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.1.0)
+[![Release](https://img.shields.io/badge/release-v2.2.0-d97757?style=flat-square&labelColor=1f1e1d)](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.2.0)
 [![Desktop](https://img.shields.io/badge/desktop-Tauri%202-e5e0d8?style=flat-square&labelColor=1f1e1d)](https://tauri.app)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-e5e0d8?style=flat-square&labelColor=1f1e1d)](#stack)
 [![Core](https://img.shields.io/badge/core-Rust-e5e0d8?style=flat-square&labelColor=1f1e1d)](src-tauri)
@@ -17,7 +17,7 @@ Spawn shells, Claude agents, editors, and VS Code onto a boundless dark
 surface, then arrange them the way you'd sketch a whiteboard. Every tab is a
 self-contained `.ccnvs` workspace you can save, reopen, and share.
 
-**[Download ccanvas 2.1.0](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.1.0)** for macOS, Windows, and Linux · [What's new](#whats-new-in-21)
+**[Download ccanvas 2.2.0](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.2.0)** for macOS, Windows, and Linux · [What's new](#whats-new-in-22)
 
 </div>
 
@@ -43,6 +43,12 @@ Claude day to day — agents, terminals, files, diffs, and editors — and
 spends that space on making each of those sharper: a real VS Code, terminal
 fidelity that matches your own shell, and drag‑and‑drop straight into a
 running agent.
+
+## What's new in 2.2
+
+| | |
+| --- | --- |
+| 🔄 **Updates itself** | The desktop app checks for new releases on launch and every few hours, downloads them in the background, and offers *Restart to update* when one is ready. It never restarts on its own, since that would end running terminals |
 
 ## What's new in 2.1
 
@@ -88,14 +94,14 @@ running agent.
 
 ### Download
 
-Prebuilt installers for **2.1.0** are on the
-[release page](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.1.0):
+Prebuilt installers for **2.2.0** are on the
+[release page](https://github.com/DevoidSloth/ccanvas/releases/tag/v2.2.0):
 
 | Platform | File |
 | --- | --- |
-| macOS (Apple silicon and Intel) | `ccanvas_2.1.0_universal.dmg` |
-| Windows | `ccanvas_2.1.0_x64-setup.exe` or `ccanvas_2.1.0_x64_en-US.msi` |
-| Linux | `ccanvas_2.1.0_amd64.AppImage`, `.deb`, or `ccanvas-2.1.0-1.x86_64.rpm` |
+| macOS (Apple silicon and Intel) | `ccanvas_2.2.0_universal.dmg` |
+| Windows | `ccanvas_2.2.0_x64-setup.exe` or `ccanvas_2.2.0_x64_en-US.msi` |
+| Linux | `ccanvas_2.2.0_amd64.AppImage`, `.deb`, or `ccanvas-2.2.0-1.x86_64.rpm` |
 
 **Opening it on macOS:** the app isn't notarized (that needs a paid Apple
 Developer account), so Gatekeeper will flag it as being from an unidentified
@@ -297,5 +303,5 @@ backend.
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
 
 <div align="center">
-<sub>ccanvas 2.1.0 · See <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> to hack on it · <a href="LICENSE">LICENSE</a></sub>
+<sub>ccanvas 2.2.0 · See <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> to hack on it · <a href="LICENSE">LICENSE</a></sub>
 </div>
