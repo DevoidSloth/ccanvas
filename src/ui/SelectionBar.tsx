@@ -12,6 +12,7 @@ import {
   IconTidy,
   IconClose,
   IconBroadcast,
+  IconStack,
 } from './icons'
 
 const isAgentEl = (e?: CanvasElement) =>
@@ -46,9 +47,12 @@ export function SelectionBar() {
   const flowsEnabled = useStore((s) => s.flowsEnabled)
   const setFlowsEnabled = useStore((s) => s.setFlowsEnabled)
 
+  const spreadOpen = useStore((s) => s.spread != null || s.focus != null)
+  const stackSelection = useStore((s) => s.stackSelection)
+
   const [bc, setBc] = useState('')
 
-  if (selection.length === 0) return null
+  if (selection.length === 0 || spreadOpen) return null
 
   const selEls = ws.elements.filter((e) => selection.includes(e.id))
   const loneArrow =
@@ -63,6 +67,12 @@ export function SelectionBar() {
   const fromTitle = (arrowFrom && 'title' in arrowFrom && arrowFrom.title) || 'source'
   const toTitle = (arrowTo && 'title' in arrowTo && arrowTo.title) || 'target'
   const multi = selection.length >= 2
+  // two or more widgets (not all already one stack) can be stacked
+  const selWidgets = selEls.filter((e) => e.type === 'widget')
+  const canStack =
+    selWidgets.length >= 2 &&
+    !selWidgets.some((e) => e.locked) &&
+    new Set(selWidgets.map((e) => (e.type === 'widget' && e.stackId) || e.id)).size >= 2
 
   // patch the lone arrow's flow config (creating it on first edit)
   const patchFlow = (patch: Partial<ArrowFlow>, snapshot = false) => {
@@ -132,6 +142,11 @@ export function SelectionBar() {
             >
               <IconGroup />
             </button>
+            {canStack && (
+              <button className="selbar__btn" title="Stack (S)" onClick={stackSelection}>
+                <IconStack />
+              </button>
+            )}
             <span className="selbar__sep" />
           </>
         )}
@@ -152,7 +167,7 @@ export function SelectionBar() {
         <button className="selbar__btn" title="Send to back (⌘[)" onClick={() => sendToBack(selection)}>
           <IconSendBack />
         </button>
-        <button className="selbar__btn selbar__btn--danger" title="Delete (⌫)" onClick={deleteSelection}>
+        <button className="selbar__btn selbar__btn--danger" title="Delete" onClick={() => deleteSelection()}>
           <IconClose />
         </button>
       </div>

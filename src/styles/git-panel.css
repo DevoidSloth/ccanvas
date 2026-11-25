@@ -22,7 +22,7 @@
 }
 .ghd__repo {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(12.5px * var(--ts));
   color: var(--ink);
   font-weight: 500;
 }
@@ -38,7 +38,7 @@
   border-radius: var(--r-sm);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts));
   transition: border-color 0.12s ease, background 0.12s ease;
 }
 .ghd__branch:hover {
@@ -47,7 +47,7 @@
 }
 .ghd__branch-ico {
   color: var(--ink-faint);
-  font-size: 13px;
+  font-size: calc(13px * var(--ts));
 }
 .ghd__branch-name {
   white-space: nowrap;
@@ -56,7 +56,7 @@
 }
 .ghd__caret {
   color: var(--ink-faint);
-  font-size: 9px;
+  font-size: calc(10px * var(--ts));
 }
 .ghd__sync {
   display: flex;
@@ -70,7 +70,7 @@
   border-radius: var(--r-sm);
   color: var(--accent-bright);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts));
   white-space: nowrap;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -83,7 +83,7 @@
   cursor: default;
 }
 .ghd__sync-sub {
-  font-size: 10px;
+  font-size: calc(11px * var(--ts));
   opacity: 0.85;
 }
 
@@ -119,7 +119,7 @@
   border: none;
   color: var(--ink-faint);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts));
   border-bottom: 2px solid transparent;
   transition: color 0.12s ease, border-color 0.12s ease;
 }
@@ -131,7 +131,7 @@
   border-bottom-color: var(--accent);
 }
 .ghd__count {
-  font-size: 9.5px;
+  font-size: calc(10.5px * var(--ts));
   min-width: 16px;
   padding: 1px 5px;
   border-radius: 100px;
@@ -150,7 +150,7 @@
   padding: 7px 10px;
   border-bottom: 1px solid var(--line-soft);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(11px * var(--ts));
   color: var(--ink-faint);
   flex-shrink: 0;
   cursor: pointer;
@@ -170,7 +170,7 @@
   gap: 8px;
   padding: 4px 10px;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts));
   cursor: pointer;
   border-left: 2px solid transparent;
 }
@@ -206,7 +206,7 @@
 }
 .ghd__fname-dir {
   color: var(--ink-faint);
-  font-size: 10px;
+  font-size: calc(11px * var(--ts));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -219,7 +219,7 @@
   display: grid;
   place-items: center;
   border-radius: 4px;
-  font-size: 9.5px;
+  font-size: calc(10.5px * var(--ts));
   font-weight: 600;
 }
 .ghd__badge--mod {
@@ -252,7 +252,7 @@
   border-radius: var(--r-sm);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts));
   padding: 7px 9px;
   outline: none;
   user-select: text;
@@ -279,7 +279,7 @@
   border-radius: var(--r-sm);
   color: var(--accent-bright);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts));
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -312,7 +312,7 @@
 .ghd__commit-subj {
   display: block;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts));
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
@@ -321,7 +321,7 @@
 .ghd__commit-meta {
   display: block;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: calc(10.5px * var(--ts));
   color: var(--ink-faint);
   margin-top: 3px;
   white-space: nowrap;
@@ -343,7 +343,7 @@
   padding: 20px;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(12px * var(--ts));
   color: var(--ink-faint);
 }
 /* per-line diff styling scoped to the git panel: a continuous colored gutter on

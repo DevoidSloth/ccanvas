@@ -12,14 +12,18 @@
     "tauri": "tauri",
     "app": "tauri dev",
     "app:build": "tauri build",
-    "app:install": "tauri build --bundles app && ditto src-tauri/target/release/bundle/macos/ccanvas.app /Applications/ccanvas.app"
+    "app:install": "tauri build --bundles app && ditto src-tauri/target/release/bundle/macos/ccanvas.app /Applications/ccanvas.app",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.4.0",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.1",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-image": "^0.9.0",
+    "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
     "h5wasm": "^0.10.2",
     "hyparquet": "^1.26.0",
     "hyparquet-compressors": "^1.1.1",
@@ -38,6 +42,7 @@
     "concurrently": "^9.0.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.3",
+    "vitest": "^2.1.9",
     "ws": "^8.18.0"
   },
   "optionalDependencies": {

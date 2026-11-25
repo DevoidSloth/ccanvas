@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WidgetElement, WidgetKind } from '../lib/types'
+import { livePlace } from '../lib/view'
 import { useStore } from '../store/workspace'
 import { widgetKindForFile, VIDEO_EXTENSIONS } from '../lib/filetypes'
 import {
@@ -417,8 +418,10 @@ export function FilesBody({ el }: { el: WidgetElement }) {
 
   const visible = useMemo(() => flatten(cache, expanded, root), [cache, expanded, root])
 
-  const openIn = (kind: WidgetKind, path: string) =>
-    spawnWidget(kind, el.x + el.w + 320, el.y + 160, { path, cwd: el.cwd })
+  const openIn = (kind: WidgetKind, path: string) => {
+    const at = livePlace(el)
+    spawnWidget(kind, at.x + at.w + 320, at.y + 160, { path, cwd: el.cwd })
+  }
 
   const openFile = (path: string) => openIn(widgetKindForFile(path), path)
 
@@ -433,7 +436,7 @@ export function FilesBody({ el }: { el: WidgetElement }) {
       items.push({
         label: 'Open as file tree',
         onClick: () =>
-          spawnWidget('files', el.x + el.w + 320, el.y + 160, {
+          spawnWidget('files', livePlace(el).x + el.w + 320, livePlace(el).y + 160, {
             path: entry.path,
             cwd: el.cwd,
             title: entry.name,

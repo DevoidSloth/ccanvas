@@ -42,7 +42,9 @@ export function TermNumbers() {
     }
   }, [])
 
-  if (!shown) return null
+  // in focus mode the strip shows the numbers instead
+  const focused = useStore((s) => !!s.focus)
+  if (!shown || focused) return null
   return (
     <div className="term-nums">
       {orderedTerminals()
@@ -53,7 +55,8 @@ export function TermNumbers() {
             className={`term-num${t.id === activeWidgetId ? ' term-num--on' : ''}`}
             style={
               {
-                left: t.x * cam.zoom + cam.x,
+                // stacked terminals share a corner — fan their badges out
+                left: t.x * cam.zoom + cam.x + (t.stackId ? (t.stackOrder ?? 0) * 46 : 0),
                 top: t.y * cam.zoom + cam.y,
                 '--k': t.color ?? 'var(--accent)',
               } as React.CSSProperties

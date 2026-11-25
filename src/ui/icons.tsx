@@ -127,6 +127,20 @@ export const IconClose = (p: P) => (
   </S>
 )
 
+export const IconTrash = (p: P) => (
+  <S {...p}>
+    <path d="M4 7h16M10 7V4.5h4V7M6.5 7l.9 12.5h9.2l.9-12.5M10 11v5M14 11v5" />
+  </S>
+)
+
+/** two panes side by side: split focus */
+export const IconSplit = (p: P) => (
+  <S {...p}>
+    <rect x="3.5" y="5" width="17" height="14" rx="2" />
+    <path d="M12 5v14" />
+  </S>
+)
+
 export const IconFit = (p: P) => (
   <S {...p}>
     <path d="M4 9V5a1 1 0 011-1h4" />
@@ -169,6 +183,12 @@ export const IconReload = (p: P) => (
 export const IconBack = (p: P) => (
   <S {...p}>
     <path d="M15 5l-7 7 7 7" />
+  </S>
+)
+
+export const IconForward = (p: P) => (
+  <S {...p}>
+    <path d="M9 5l7 7-7 7" />
   </S>
 )
 
@@ -307,6 +327,47 @@ export const IconLayers = (p: P) => (
   </S>
 )
 
+/** a stack of widgets: one card in front, one peeking behind */
+export const IconStack = (p: P) => (
+  <S {...p}>
+    <rect x="3.5" y="8.5" width="13" height="11" rx="2" />
+    <path d="M7.5 5h10a2 2 0 012 2v9" />
+  </S>
+)
+
+/** spread a stack out into a grid */
+export const IconSpread = (p: P) => (
+  <S {...p}>
+    <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+    <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
+    <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
+    <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
+  </S>
+)
+
+/** take something out of its container */
+export const IconPullOut = (p: P) => (
+  <S {...p}>
+    <path d="M14 4h6v6" />
+    <path d="M20 4l-8.5 8.5" />
+    <path d="M17 14v4.5a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 014 18.5v-10A1.5 1.5 0 015.5 7H10" />
+  </S>
+)
+
+/** focus: corners opening out */
+export const IconFocus = (p: P) => (
+  <S {...p}>
+    <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
+  </S>
+)
+
+/** back from focus: corners closing in */
+export const IconUnfocus = (p: P) => (
+  <S {...p}>
+    <path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" />
+  </S>
+)
+
 export const IconSendBack = (p: P) => (
   <S {...p}>
     <rect x="4" y="4" width="11" height="11" rx="1.5" />
@@ -402,6 +463,84 @@ export const IconVideo = (p: P) => (
   </S>
 )
 
+// A beamed pair of notes — the Now playing widget.
+export const IconMusic = (p: P) => (
+  <S {...p}>
+    <path d="M9 18V5.5l11-2V16" />
+    <circle cx="6.5" cy="18" r="2.5" />
+    <circle cx="17.5" cy="16" r="2.5" />
+  </S>
+)
+
+// Transport controls for Now playing: solid shapes, so they read small.
+export const IconPlay = (p: P) => (
+  <S {...p}>
+    <path d="M8 5.5v13l10.5-6.5L8 5.5z" fill="currentColor" />
+  </S>
+)
+export const IconPause = (p: P) => (
+  <S {...p}>
+    <path d="M8 5.5v13M16 5.5v13" strokeWidth="3" />
+  </S>
+)
+export const IconPrevTrack = (p: P) => (
+  <S {...p}>
+    <path d="M6 5.5v13" strokeWidth="2.2" />
+    <path d="M18.5 5.5v13L9 12l9.5-6.5z" fill="currentColor" />
+  </S>
+)
+export const IconNextTrack = (p: P) => (
+  <S {...p}>
+    <path d="M18 5.5v13" strokeWidth="2.2" />
+    <path d="M5.5 5.5v13L15 12 5.5 5.5z" fill="currentColor" />
+  </S>
+)
+export const IconShuffle = (p: P) => (
+  <S {...p}>
+    <path d="M3.5 7h3c3.5 0 5.5 10 9 10h4.5" />
+    <path d="M3.5 17h3c1.4 0 2.6-1.6 3.6-3.6M13.9 9.6C14.9 8 16 7 17.5 7h2.5" />
+    <path d="M17.5 4.5L20 7l-2.5 2.5M17.5 14.5L20 17l-2.5 2.5" />
+  </S>
+)
+export const IconRepeat = (p: P) => (
+  <S {...p}>
+    <path d="M4.5 11V9.5a2.5 2.5 0 012.5-2.5h12" />
+    <path d="M16.5 4.5L19 7l-2.5 2.5" />
+    <path d="M19.5 13v1.5a2.5 2.5 0 01-2.5 2.5H5" />
+    <path d="M7.5 19.5L5 17l2.5-2.5" />
+  </S>
+)
+export const IconRepeatOne = (p: P) => (
+  <S {...p}>
+    <path d="M4.5 11V9.5a2.5 2.5 0 012.5-2.5h12" />
+    <path d="M16.5 4.5L19 7l-2.5 2.5" />
+    <path d="M19.5 13v1.5a2.5 2.5 0 01-2.5 2.5H5" />
+    <path d="M7.5 19.5L5 17l2.5-2.5" />
+    <path d="M11 11l1.3-.8V14" strokeWidth="1.5" />
+  </S>
+)
+export const IconHeart = ({ filled, ...p }: P & { filled?: boolean }) => (
+  <S {...p}>
+    <path
+      d="M12 19.5s-7.5-4.4-7.5-9.8A4.2 4.2 0 0112 7.3a4.2 4.2 0 017.5 2.4c0 5.4-7.5 9.8-7.5 9.8z"
+      fill={filled ? 'currentColor' : 'none'}
+    />
+  </S>
+)
+export const IconVolume = ({ level = 2, ...p }: P & { level?: 0 | 1 | 2 }) => (
+  <S {...p}>
+    <path d="M4 9.5h3l4.5-4v13l-4.5-4H4z" fill="currentColor" strokeWidth="1.4" />
+    {level === 0 ? (
+      <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" />
+    ) : (
+      <>
+        <path d="M15 9.2a4 4 0 010 5.6" />
+        {level === 2 && <path d="M17.8 6.5a7.8 7.8 0 010 11" />}
+      </>
+    )}
+  </S>
+)
+
 // A ring of rays — the Claude workspace tab (echoes the app mark / agent star).
 export const IconClaude = (p: P) => (
   <S {...p}>
@@ -416,6 +555,14 @@ export const IconInfo = (p: P) => (
     <circle cx="12" cy="12" r="9" />
     <path d="M12 11v5" />
     <circle cx="12" cy="7.6" r="1" fill="currentColor" stroke="none" />
+  </S>
+)
+
+// A monitor — the Claude desktop app's sessions (mirrors).
+export const IconDesktop = (p: P) => (
+  <S {...p}>
+    <rect x="3" y="4.5" width="18" height="12" rx="1.2" />
+    <path d="M9 20h6M12 16.5V20" />
   </S>
 )
 

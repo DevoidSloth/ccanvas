@@ -21,17 +21,33 @@ tauri-build = { version = "2.5.6", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.10.3", features = ["protocol-asset"] }
+# "unstable" enables child webviews (the web widget's browser in focus mode)
+tauri = { version = "2.10.3", features = ["protocol-asset", "unstable"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 portable-pty = "0.9"
 notify = "6"
 base64 = "0.22"
 plist = "1"
+# the web widget's preview proxy (web_proxy.rs): the same TLS build the
+# updater already uses (rustls on ring), so no extra crates
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# a snapshot of a web widget's native view, shown while it's hidden on the
+# canvas (native_view.rs), and its website data (web_data.rs); all
+# already in the build through wry
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSDate", "NSUUID", "NSArray", "NSSet", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration", "WKWebsiteDataStore"] }
+# checking for macOS 14 (web_data.rs)
+objc2 = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

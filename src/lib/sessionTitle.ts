@@ -15,9 +15,11 @@ import { watchTranscriptSummary } from './transcript'
 const DEFAULT_TITLE = 'claude agent'
 
 export function useSyncSessionTitle(el: WidgetElement) {
-  const { id, kind, cwd, sessionId } = el
+  const { id, kind, cwd, sessionId, mirrorOf } = el
   useEffect(() => {
-    if (kind !== 'agent' || !cwd || !sessionId) return
+    // desktop-app mirrors follow the session's renames too (the desktop app
+    // records its titles as custom-title events in the transcript)
+    if ((kind !== 'agent' && mirrorOf !== 'desktop') || !cwd || !sessionId) return
     let seenCustom: string | null | undefined // undefined = not read yet
     return watchTranscriptSummary(cwd, sessionId, (summary) => {
       if (!summary) return
@@ -36,5 +38,5 @@ export function useSyncSessionTitle(el: WidgetElement) {
         ;(w as WidgetElement).title = next
       })
     })
-  }, [id, kind, cwd, sessionId])
+  }, [id, kind, cwd, sessionId, mirrorOf])
 }

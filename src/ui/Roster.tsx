@@ -1,14 +1,101 @@
 import { useEffect, useMemo, useState } from 'react'
-import { viewCenter } from '../lib/view'
-import { useStore } from '../store/workspace'
+import { viewCenter, revealLayerOf } from '../lib/view'
+import { useStore, selectActive } from '../store/workspace'
 import { useAgents, useDisplayStatus, sendPrompt } from '../lib/agents'
-import { watchTranscriptSummary } from '../lib/transcript'
+import { watchTranscriptSummary, type TranscriptSummary } from '../lib/transcript'
+import { useAgentContext } from '../lib/context'
+import { isDesktopMirror, mirrorWaiting, openInClaude } from '../lib/desktopSessions'
+import { waitingTitle } from '../widgets/MirrorStatus'
 import type { WidgetElement, Workspace } from '../lib/types'
-import { IconClose, IconBroadcast } from './icons'
+import { IconClose, IconBroadcast, IconAgent } from './icons'
+import { StatusGlyph, StatusIcon } from '../widgets/widgetIcons'
 import '../styles/agent-tools.css'
 
 
 type Row = { agent: WidgetElement; tab: Workspace }
+
+/** One readable line of a reply: first non-empty line, markdown markers dropped. */
+function firstLine(reply: string | null | undefined): string | undefined {
+  return reply
+    ?.split('\n')
+    .map((l) => l.replace(/^[#>*\-\s`]+/, '').trim())
+    .find(Boolean)
+    ?.slice(0, 160)
+}
+
+/** A desktop-app mirror: read-only, so its status comes from its transcript
+ *  rather than a live terminal. The status itself is the one the mirror widget
+ *  publishes (useMirrorStatusSync), so it matches its icon everywhere else; the
+ *  summary here adds what it's waiting on and its last reply. */
+function MirrorRow({ row, onFocus }: { row: Row; onFocus: () => void }) {
+  const { agent: el, tab } = row
+  const activeTabId = useStore((s) => s.activeTabId)
+  const [summary, setSummary] = useState<TranscriptSummary | null>(null)
+  const [now, setNow] = useState(Date.now())
+  useEffect(
+    () =>
+      watchTranscriptSummary(el.cwd, el.sessionId, (s) => {
+        setSummary(s)
+        setNow(Date.now())
+      }),
+    [el.cwd, el.sessionId],
+  )
+  const ctx = useAgentContext(el.cwd, el.sessionId, el.model)
+  // re-check while a tool call is open: the transcript is quiet while it waits
+  const open = !!summary?.pending
+  useEffect(() => {
+    if (!open) return
+    const t = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(t)
+  }, [open])
+  const waiting = mirrorWaiting(summary, now)
+  const st = useDisplayStatus(el.id) ?? 'off'
+  const last = waiting?.kind === 'ask' ? waiting.question : firstLine(summary?.lastReply)
+  return (
+    <div className="roster__row" onClick={onFocus}>
+      <StatusGlyph
+        status={st}
+        icon={<IconAgent />}
+        title={
+          waiting
+            ? waitingTitle(waiting)
+            : st === 'working'
+              ? 'running now'
+              : st === 'done'
+                ? 'just finished'
+                : st === 'idle'
+                  ? 'idle'
+                  : 'no transcript'
+        }
+      />
+      <div className="roster__main">
+        <div className="roster__top">
+          <span className="roster__name">{el.title}</span>
+          <span className="dsk-badge">Desktop</span>
+          {waiting && (
+            <button
+              className={`dsk-wait dsk-wait--${waiting.kind}`}
+              title={waitingTitle(waiting)}
+              onClick={(e) => {
+                e.stopPropagation()
+                openInClaude(el)
+              }}
+            >
+              {waiting.kind === 'ask' ? 'Needs you' : `${waiting.tool}?`}
+            </button>
+          )}
+          {tab.id !== activeTabId && <span className="roster__tab">{tab.name}</span>}
+          {ctx && (
+            <span className="roster__meter" title="context window fill">
+              {Math.round(ctx.pct)}%
+            </span>
+          )}
+        </div>
+        {last && <div className="roster__last">{last}</div>}
+      </div>
+    </div>
+  )
+}
 
 /** Each agent's latest reply, read from its session transcript. The terminal
  *  tail is full of TUI chrome (spinners, hints, box drawing), so it isn't used. */
@@ -18,12 +105,7 @@ function useLastMessages(rows: Row[]): Record<string, string> {
   useEffect(() => {
     const offs = rows.map(({ agent }) =>
       watchTranscriptSummary(agent.cwd, agent.sessionId, (summary) => {
-        // one readable line: first non-empty line, markdown markers dropped
-        const line = summary?.lastReply
-          ?.split('\n')
-          .map((l) => l.replace(/^[#>*\-\s`]+/, '').trim())
-          .find(Boolean)
-          ?.slice(0, 160)
+        const line = firstLine(summary?.lastReply)
         setMsgs((m) => {
           if (m[agent.id] === line) return m
           const next = { ...m }
@@ -44,13 +126,7 @@ function useLastMessages(rows: Row[]): Record<string, string> {
 // all. The spatial canvas is great for layout but poor at "is anything stuck?" —
 // this is the at-scale answer.
 function RosterDot({ id }: { id: string }) {
-  const st = useDisplayStatus(id) ?? 'off'
-  return (
-    <span
-      className={`agent-dot agent-dot--${st}`}
-      title={st === 'done' ? 'just finished' : st}
-    />
-  )
+  return <StatusIcon id={id} kind="agent" />
 }
 
 export function Roster() {
@@ -75,11 +151,19 @@ export function Roster() {
         if (e.type === 'widget' && e.kind === 'agent') out.push({ agent: e, tab })
     return out
   }, [tabs])
+  // desktop-app mirrors: listed, but never message targets (they're read-only)
+  const mirrors = useMemo<Row[]>(() => {
+    const out: Row[] = []
+    for (const tab of tabs) for (const e of tab.elements) if (isDesktopMirror(e)) out.push({ agent: e, tab })
+    return out
+  }, [tabs])
   const lastMessage = useLastMessages(rows)
 
-  const focus = (row: Row) => {
+  const focus = (row: Row, asTarget = true) => {
     if (activeTabId !== row.tab.id) switchTab(row.tab.id)
-    const cam = row.tab.camera
+    // an agent on another layer: switch there first, then frame it in that view
+    revealLayerOf(row.agent.id)
+    const cam = selectActive(useStore.getState()).camera
     const cx = row.agent.x + row.agent.w / 2
     const cy = row.agent.y + row.agent.h / 2
     setCamera({
@@ -90,7 +174,7 @@ export function Roster() {
     setSelection([row.agent.id])
     setActiveWidget(row.agent.id)
     bringToFront([row.agent.id])
-    setTarget(row.agent.id)
+    if (asTarget) setTarget(row.agent.id)
   }
 
   const send = () => {
@@ -111,7 +195,7 @@ export function Roster() {
     <div className="panel">
       <div className="panel__head">
         <span className="panel__title">Agents</span>
-        <span className="panel__badge">{rows.length}</span>
+        <span className="panel__badge">{rows.length + mirrors.length}</span>
         <span className="panel__spacer" />
         <button className="panel__x" title="Close" onClick={() => setOpenPanel(null)}>
           <IconClose size={14} />
@@ -119,7 +203,7 @@ export function Roster() {
       </div>
 
       <div className="panel__body">
-        {rows.length === 0 && (
+        {rows.length === 0 && mirrors.length === 0 && (
           <div className="panel__empty">No agents yet. Start one with ⌘⇧T.</div>
         )}
         {rows.map((row) => {
@@ -149,6 +233,9 @@ export function Roster() {
             </div>
           )
         })}
+        {mirrors.map((row) => (
+          <MirrorRow key={row.agent.id} row={row} onFocus={() => focus(row, false)} />
+        ))}
       </div>
 
       <div className="panel__composer">

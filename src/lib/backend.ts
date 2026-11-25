@@ -8,29 +8,87 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 const BASE = 'http://127.0.0.1:7531'
+// The web widget proxy is served from its own port so a proxied page never
+// shares an origin with the API. The desktop app runs its own (web_proxy.rs).
+const NODE_PROXY_BASE = 'http://127.0.0.1:7532'
 
 /** Running inside the Tauri desktop shell? */
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
-async function httpGet<T>(path: string, timeoutMs?: number): Promise<T> {
+/** Can this build mirror Claude desktop-app sessions? That reads the Claude
+ *  app's own session files at a macOS path (src-tauri/src/desktop_sessions.rs),
+ *  so the Desktop sessions panel is offered only in the desktop app on macOS. */
+export function desktopMirrorsSupported(): boolean {
+  return isTauri() && typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+}
+
+async function timedFetch(url: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
   const ctrl = timeoutMs ? new AbortController() : null
   const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null
   try {
-    const r = await fetch(BASE + path, { signal: ctrl?.signal })
-    if (!r.ok) throw new Error(`${path} → ${r.status}`)
-    return (await r.json()) as T
+    return await fetch(url, { ...init, signal: ctrl?.signal ?? init.signal })
   } finally {
     if (timer) clearTimeout(timer)
   }
+}
+
+// The Node backend only serves requests that carry its per-launch token, which
+// /health hands out to the app's own origin. Cached here; dropped and fetched
+// again when the backend answers 401 (it restarted with a new one).
+type Health = { ok: boolean; ffmpeg?: boolean; token?: string }
+let token: string | null = null
+let pendingHealth: Promise<Health> | null = null
+
+function health(timeoutMs?: number): Promise<Health> {
+  pendingHealth ??= timedFetch(BASE + '/health', {}, timeoutMs)
+    .then(async (r) => {
+      if (!r.ok) throw new Error(`/health → ${r.status}`)
+      const h = (await r.json()) as Health
+      if (h.token) token = h.token
+      return h
+    })
+    .finally(() => {
+      pendingHealth = null
+    })
+  return pendingHealth
+}
+
+/** The backend token for URLs that can't carry a header (WebSocket, <video>).
+ *  `fresh` re-reads it instead of trusting the cache. */
+export async function backendToken(fresh = false): Promise<string | null> {
+  if (!token || fresh) await health(1500).catch(() => null)
+  return token
+}
+
+/** Append the cached token to a backend URL (null-safe for sync callers). */
+function withToken(url: string): string {
+  return token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
+}
+
+async function apiFetch(path: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const t = await backendToken()
+    const headers = new Headers(init.headers)
+    if (t) headers.set('X-Ccanvas-Token', t)
+    const r = await timedFetch(BASE + path, { ...init, headers }, timeoutMs)
+    if (r.status !== 401 || attempt > 0) return r
+    token = null
+  }
+}
+
+async function httpGet<T>(path: string, timeoutMs?: number): Promise<T> {
+  const r = await apiFetch(path, {}, timeoutMs)
+  if (!r.ok) throw new Error(`${path} → ${r.status}`)
+  return (await r.json()) as T
 }
 
 /** Is a native/file backend available at all? */
 export async function backendOnline(): Promise<boolean> {
   if (isTauri()) return true
   try {
-    await httpGet<{ ok: boolean }>('/health', 700)
+    await health(700)
     return true
   } catch {
     return false
@@ -282,7 +340,7 @@ export async function runCommand(
     }
   }
   try {
-    const r = await fetch(BASE + '/run', {
+    const r = await apiFetch('/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ program, args, cwd }),
@@ -304,7 +362,7 @@ export async function saveFile(path: string, content: string): Promise<boolean> 
     }
   }
   try {
-    const r = await fetch(BASE + '/save', {
+    const r = await apiFetch('/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path, content }),
@@ -330,7 +388,7 @@ export async function revealPath(path: string): Promise<void> {
     }
   }
   try {
-    await fetch(`${BASE}/reveal?path=${encodeURIComponent(path)}`)
+    await apiFetch(`/reveal?path=${encodeURIComponent(path)}`)
   } catch {
     /* backend offline — nothing we can do from the sandbox */
   }
@@ -349,9 +407,17 @@ export async function openExternal(url: string): Promise<void> {
   window.open(url, '_blank', 'noopener')
 }
 
-/** URL that routes through the backend proxy (strips X-Frame-Options/CSP). */
-export function proxyUrl(target: string): string {
-  return `${BASE}/proxy?url=${encodeURIComponent(target)}`
+/** URL that routes `target` through the preview proxy at `base` (see
+ *  previewProxy), which strips X-Frame-Options/CSP so the page can be framed. */
+export function proxyUrl(base: string, target: string): string {
+  return `${base}/proxy?url=${encodeURIComponent(target)}`
+}
+
+/** A video player (lib/weburl.ts videoEmbed) framed by the desktop app's
+ *  proxy, so it plays with a referrer: the app's own tauri:// page sends none,
+ *  and YouTube's player refuses to play without one. */
+export function playerUrl(base: string, embed: string): string {
+  return `${base}/player?src=${encodeURIComponent(embed)}`
 }
 
 /**
@@ -370,7 +436,7 @@ export function mediaUrl(path: string): string | null {
       return null
     }
   }
-  return `${BASE}/file?path=${encodeURIComponent(path)}`
+  return withToken(`${BASE}/file?path=${encodeURIComponent(path)}`)
 }
 
 /**
@@ -393,7 +459,7 @@ export async function mediaEndpoint(): Promise<MediaEndpoint | null> {
     }
   }
   try {
-    const r = await httpGet<{ ok: boolean; ffmpeg?: boolean }>('/health', 800)
+    const r = await health(800)
     return r.ok ? { base: BASE, ffmpeg: !!r.ffmpeg } : null
   } catch {
     return null
@@ -406,7 +472,8 @@ export async function mediaEndpoint(): Promise<MediaEndpoint | null> {
  * (tested) server as transcode/probe rather than the asset protocol.
  */
 export function fileStreamUrl(base: string, path: string): string {
-  return `${base}/file?path=${encodeURIComponent(path)}`
+  const url = `${base}/file?path=${encodeURIComponent(path)}`
+  return base === BASE ? withToken(url) : url
 }
 
 /**
@@ -415,7 +482,8 @@ export function fileStreamUrl(base: string, path: string): string {
  */
 export function transcodeUrl(base: string, path: string, start = 0): string {
   const q = start > 0 ? `&start=${Math.floor(start)}` : ''
-  return `${base}/transcode?path=${encodeURIComponent(path)}${q}`
+  const url = `${base}/transcode?path=${encodeURIComponent(path)}${q}`
+  return base === BASE ? withToken(url) : url
 }
 
 /** Rich media metadata from ffprobe (drives the media-info widget). */
@@ -488,9 +556,11 @@ export async function probeMedia(base: string, path: string): Promise<MediaInfo>
   try {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 6000)
-    const r = await fetch(`${base}/probe?path=${encodeURIComponent(path)}`, {
-      signal: ctrl.signal,
-    })
+    const probe = `/probe?path=${encodeURIComponent(path)}`
+    const r =
+      base === BASE
+        ? await apiFetch(probe, { signal: ctrl.signal })
+        : await fetch(base + probe, { signal: ctrl.signal })
     clearTimeout(timer)
     if (!r.ok) return EMPTY_MEDIA_INFO
     return { ...EMPTY_MEDIA_INFO, ...((await r.json()) as MediaInfo) }
@@ -500,16 +570,23 @@ export async function probeMedia(base: string, path: string): Promise<MediaInfo>
 }
 
 /**
- * Is the HTTP proxy reachable? The proxy lives on the Node server (port 7531),
- * so unlike backendOnline() this always probes HTTP — the desktop app only has
- * it when `npm run server` is also running.
+ * Where the web widget's canvas preview of remote sites is served from, or
+ * null if nowhere. Always its own loopback origin, never the app's or the
+ * API's, so a proxied page can't call either:
+ *   • Tauri — the in-process proxy (web_proxy.rs), started on app launch.
+ *   • Web   — the Node server's proxy on port 7532 (`npm run server`).
  */
-export async function proxyAvailable(): Promise<boolean> {
+let tauriProxy: Promise<string | null> | null = null
+export async function previewProxy(): Promise<string | null> {
+  if (isTauri()) {
+    tauriProxy ??= invoke<string | null>('web_proxy_url').catch(() => null)
+    return tauriProxy
+  }
   try {
-    await httpGet<{ ok: boolean }>('/health', 700)
-    return true
+    await health(700)
+    return NODE_PROXY_BASE
   } catch {
-    return false
+    return null
   }
 }
 
@@ -560,7 +637,7 @@ export type CodeServer = { url: string; port: number; started: boolean }
  *  Rejects with a human-readable message when VS Code can't be started. */
 export async function codeServe(dir: string): Promise<CodeServer> {
   if (isTauri()) return invoke<CodeServer>('code_serve', { dir })
-  const r = await fetch(`${BASE}/code-serve?dir=${encodeURIComponent(dir)}`)
+  const r = await apiFetch(`/code-serve?dir=${encodeURIComponent(dir)}`)
   const body = (await r.json()) as CodeServer & { error?: string }
   if (!r.ok) throw new Error(body.error || 'couldn\'t start VS Code')
   return body
@@ -570,7 +647,7 @@ export async function codeServe(dir: string): Promise<CodeServer> {
 export async function codeStop(dir: string): Promise<void> {
   try {
     if (isTauri()) await invoke('code_stop', { dir })
-    else await fetch(`${BASE}/code-stop?dir=${encodeURIComponent(dir)}`)
+    else await apiFetch(`/code-stop?dir=${encodeURIComponent(dir)}`)
   } catch {
     /* already gone */
   }

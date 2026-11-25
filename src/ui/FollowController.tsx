@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { viewCenter } from '../lib/view'
 import { useStore } from '../store/workspace'
+import { activeLayerId, layerOf } from '../lib/layers'
 import { useAgents, type AgentStatus } from '../lib/agents'
 
 
@@ -13,6 +14,8 @@ function centerOnAgent(id: string) {
   if (!tab) return
   const agent = tab.elements.find((e) => e.id === id)
   if (!agent || agent.type !== 'widget') return
+  // don't switch layers under you to chase an agent: its layer's LED says it
+  if (layerOf(agent) !== activeLayerId(tab)) return
   if (s.activeTabId !== tab.id) s.switchTab(tab.id)
   const cam = tab.camera
   const cx = agent.x + agent.w / 2

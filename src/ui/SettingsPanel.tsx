@@ -4,6 +4,7 @@ import {
   useSettings,
   PALETTES,
   AGENT_CLIS,
+  TEXT_SIZES,
   comboFrom,
   formatSeq,
   isModifierKey,
@@ -11,12 +12,14 @@ import {
   type KeySeq,
 } from '../lib/settings'
 import { IconClose, IconPlus } from './icons'
+import { isTauri } from '../lib/backend'
+import { invoke } from '@tauri-apps/api/core'
 import '../styles/agent-tools.css'
 
 // How long to wait after the first press for a second one (a chord like ⌃X ⌃F).
 const CHORD_WAIT = 900
 
-// Preferences: which shortcuts open the tab finder, and the app's colour palette.
+// Preferences: which shortcuts open the tab finder, the colour palette and text size.
 export function SettingsPanel() {
   const setOpenPanel = useStore((s) => s.setOpenPanel)
   const s = useSettings()
@@ -89,6 +92,29 @@ export function SettingsPanel() {
           ))}
         </div>
         <div className="set__hint">Terminals keep the colours from your iTerm2 profile.</div>
+
+        <div className="set__section">Text size</div>
+        <div className="set__sizes">
+          {TEXT_SIZES.map((t) => (
+            <button
+              key={t.id}
+              className={`set__size${s.textSize === t.id ? ' set__size--on' : ''}`}
+              title={`${Math.round(t.scale * 100)}%`}
+              onClick={() => s.update({ textSize: t.id })}
+            >
+              <span className="set__size-a" style={{ fontSize: 13 * t.scale }}>
+                Aa
+              </span>
+              <span className="set__swatch-name">{t.name}</span>
+            </button>
+          ))}
+        </div>
+        <div className="set__hint">
+          Scales text in widgets, terminals and panels; widgets keep their size.
+        </div>
+
+        <div className="set__section">Web sign-ins</div>
+        <WebSignIns />
       </div>
     </div>
   )
@@ -194,6 +220,56 @@ function CustomKeys() {
           Opens the tab finder. Include ⌃, ⌥ or ⌘ for it to work inside terminals.
         </span>
       </span>
+    </div>
+  )
+}
+
+// ---- web sign-ins (src-tauri/src/web_data.rs) ----
+// The web widget's browser keeps its own sign-ins; here they can all be
+// signed out at once.
+
+function WebSignIns() {
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
+  const [armed, setArmed] = useState(false)
+
+  if (!isTauri())
+    return <div className="set__hint">Sign-ins are kept by the desktop app's browser.</div>
+
+  const signOut = async () => {
+    if (!armed) {
+      setArmed(true)
+      window.setTimeout(() => setArmed(false), 4000)
+      return
+    }
+    setArmed(false)
+    setBusy(true)
+    setNote(null)
+    try {
+      await invoke('web_sign_out_all')
+      setNote({ ok: true, text: 'Signed out of every site in the web browser.' })
+    } catch (e) {
+      setNote({ ok: false, text: typeof e === 'string' ? e : 'That didn’t work.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="set__web">
+      <div className="set__hint">
+        Web widgets share one browser that remembers your sign-ins, apart from the app.
+      </div>
+      <div className="set__web-actions">
+        <button
+          className={`set__btn${armed ? ' set__btn--danger' : ''}`}
+          disabled={busy}
+          onClick={() => void signOut()}
+        >
+          {armed ? 'Click again to sign out everywhere' : 'Sign out of all sites'}
+        </button>
+      </div>
+      {note && <div className={`set__note${note.ok ? '' : ' set__note--err'}`}>{note.text}</div>}
     </div>
   )
 }

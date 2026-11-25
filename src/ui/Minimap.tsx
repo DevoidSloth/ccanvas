@@ -2,6 +2,7 @@ import { viewport } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { boundsOfMany, elementBounds, screenToWorld } from '../lib/geometry'
 import { WIDGET_ACCENT } from '../lib/types'
+import { activeLayerElements } from '../lib/layers'
 
 // Overview map of the whole canvas with the current viewport outlined.
 // Click anywhere to recenter the camera there. Shown/hidden from the HUD.
@@ -14,8 +15,10 @@ export function Minimap() {
   const ws = useStore(selectActive)
   const setCamera = useStore((s) => s.setCamera)
 
-  const world = boundsOfMany(ws.elements)
-  if (!world || ws.elements.length === 0) return null
+  // the layer being shown only
+  const els = activeLayerElements(ws)
+  const world = boundsOfMany(els)
+  if (!world || els.length === 0) return null
 
   // viewport rectangle in world coords
   const cam = ws.camera
@@ -55,7 +58,7 @@ export function Minimap() {
         style={{ width: MAP_W, height: MAP_H }}
         onPointerDown={navigate}
       >
-        {ws.elements.map((el) => {
+        {els.map((el) => {
           const b = elementBounds(el)
           const p = toMap(b.x, b.y)
           const color =

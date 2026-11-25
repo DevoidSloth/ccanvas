@@ -70,7 +70,7 @@ running agent.
 
 | | |
 | --- | --- |
-| 🎨 **Settings and colour palettes** | A Settings panel (the gear in the top bar, or `⌘,` on macOS) with six palettes — Claude, Ember, Moss, Slate, Plum, and Mono — and the keys that open the tab finder |
+| 🎨 **Settings and colour palettes** | A Settings panel (the gear in the top bar, or `⌘,` on macOS) with six palettes — Claude, Ember, Moss, Slate, Plum, and Mono — a text size (Default to Larger) that scales text in widgets, terminals and panels without resizing anything, and the keys that open the tab finder |
 | 🔎 **Tab finder** | `⌃X ⌃F` opens a bar at the bottom of the window to jump to any tab by name, with Tab completion. Vim keys (`:`, `gt`, `gT`) or a shortcut of your own can be switched on in Settings |
 | 🗂️ **Tabs you can arrange** | Drag tabs to reorder them; a crowded strip squeezes its tabs before it scrolls and keeps the active one in view |
 | 🟣 **A just-finished dot** | An agent's dot turns purple for two minutes after it finishes a turn, in its title bar, the roster, and its zoomed-out card |
@@ -85,7 +85,10 @@ running agent.
 | 🎨 **Your terminal, not a generic one** | On macOS, terminal widgets pick up your default iTerm2 profile — font, cursor, ANSI palette — so a ccanvas terminal looks like the one you already live in; anything it can't read falls back to the built-in theme, as does every other platform today |
 | 🧠 **Memory panel** | A side dock renders Claude's own cross-session memory for the bound folder as a force-directed graph — nodes, links, and types, read straight from `~/.claude/projects/…/memory/` each time you open it |
 | 🔢 **Hold ⌘ to see terminal numbers** | Hold `⌘` for a beat and every terminal shows the digit that `⌘1`–`⌘9` jumps to; let go and they're gone again |
+| 🪞 **Desktop sessions, mirrored** | The **Desktop sessions** panel lists the chats you're running in the Claude desktop app (Code tab); pick some, or *Add all running*, and each becomes a read-only, live-following transcript on the canvas, with a context meter and a row in the Agents roster. Right-click a mirror → *Fork into terminal* to branch it. macOS desktop app only; it reads the desktop app's internal session files |
+| 🗂️ **Layers** | A tab can hold a stack of layers, and each layer can be its own project, with its own folder and its own view. Press `L` and the canvas tilts back into a stack of every layer; click one to dive in. Agents on hidden layers keep running. See [Layers](#layers) |
 | 📛 **Agent titles that stay in sync** | A Claude agent widget adopts the name you `/rename` inside the session, or the title Claude generates after the first prompt, instead of sitting at "claude agent" forever |
+| 🎵 **Now playing** | A small player for whatever the Spotify app (or Apple Music) is playing: artwork, track and artist, a seek bar, play/pause, previous and next, shuffle and repeat, the app's own volume and mute, and the favourite in Music. Click the artwork to open the app; when both have a track, the source label switches between them. With the widget active, `←`/`→` skip 5 seconds, `Space` plays or pauses and `↑`/`↓` set the volume. It fits any size, from a thin strip to a big focus-mode layout. `Space` → `music` (or `spotify`), or *Now playing* in the palette. It reads the apps over AppleScript, never opens one that isn't running, and polls only while the widget is on screen. The first time, macOS asks whether ccanvas may control Spotify; if you said no, allow it under System Settings → Privacy & Security → Automation. Nothing about what you're playing is saved with the canvas. macOS desktop app only for now |
 | 🪶 **A slimmer toolbar** | Fewer buttons, same power — the vector-drawing tools and GitHub-issue widgets from upstream are gone from the chrome; the surface is just Claude, a shell, and the files between them |
 
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
@@ -144,9 +147,16 @@ terminals + folders come from an optional local backend (run it in a second
 terminal, or `npm start` to run both at once):
 
 ```bash
-npm run server     # ws + http on 127.0.0.1:7531
+npm run server     # ws + http on 127.0.0.1:7531 (web preview proxy on :7532)
 npm start          # runs the pty server and the web app together
 ```
+
+The backend can run programs and read and write files, so it only answers the
+app itself: requests from any other origin are refused, and every route needs a
+token that changes each launch and is only handed to the app's origin. If you
+serve the web app from somewhere other than `127.0.0.1:5173` or
+`localhost:5173`, list that origin in `CCANVAS_ORIGINS` (comma-separated), e.g.
+`CCANVAS_ORIGINS=http://localhost:3000 npm run server`.
 
 The backend gives the browser what the sandbox can't: a real shell per terminal
 widget (via `node-pty`; prebuilt binaries ship for Windows/macOS) and a native
@@ -167,13 +177,13 @@ File drag-and-drop needs the desktop app; the VS Code widget works here too.
 | Surface | Notes |
 | --- | --- |
 | **Infinite canvas** | Pan by dragging empty canvas, middle-dragging, or scrolling with two fingers; smooth zoom with ⌘/Ctrl-scroll or a pinch; dot grid; minimap (toggle it in the bottom-right controls) |
-| **Quick insert** | `Space` opens a command box at the cursor: type a widget name (`agent` `term` `files` `diff` `editor` `note`), optionally followed by an agent's first prompt, a file path, or a note's text |
+| **Quick insert** | `Space` opens a command box at the cursor: type a widget name (`agent` `term` `files` `diff` `editor` `note` `web` `music`), optionally followed by an agent's first prompt, a file path, an address, or a note's text |
 | **Command palette** | ⌘/Ctrl-K to spawn widgets, arrange, switch tabs, open panels, insert prompts, run git, export, or jump to a widget |
-| **Widgets** | Claude agent · Terminal · File tree · Git panel · Editor (Monaco) · **VS Code** · Markdown note, plus the Transcript (right-click an agent) and data, figure, and video viewers that open from the file tree or a path clicked in a terminal |
+| **Widgets** | Claude agent · Terminal · File tree · Git panel · Editor (Monaco) · **VS Code** · Markdown note · **Web page** · Now playing (macOS), plus the Transcript (right-click an agent) and data, figure, and video viewers that open from the file tree or a path clicked in a terminal |
 | **Drag & drop** | Drop a file from the OS onto a terminal or agent to paste its path in — the way you'd hand Claude a screenshot |
 | **Agent orchestration** | Per-agent status dot (idle, working, waiting, just finished), an *N waiting* inbox, idle notifications, broadcast to many, per-agent model/prompt/flags, and colour labels you can filter the canvas by |
 | **Context meter** | Each agent's bar shows how full its context window is (read from its session transcript), with a one-click **compact** past 70% |
-| **Plan usage** | The top-bar pill shows Claude's own session and weekly limit % with reset times, using your Claude Code sign-in (desktop app); falls back to a local token estimate |
+| **Plan usage** | The top-bar pill shows Claude's own session and weekly limit % with reset times, using your Claude Code sign-in (desktop app); falls back to a local token estimate. Its popover also estimates what the canvas's agents and mirrors would cost at API prices |
 | **Memory panel** | Claude's cross-session memory for the bound folder, rendered as a graph you can pan, zoom, and click into |
 | **Agent roster** | Mission-control list of every agent across all tabs: status, cost/turns, latest reply, click-to-focus, and a composer to message one or broadcast to all |
 | **Tracking camera** | Follow an agent and watch every file it touches spawn as a viewer in an **orbit** around it, arrows pointing back; the camera stays framed on the action |
@@ -182,11 +192,58 @@ File drag-and-drop needs the desktop app; the VS Code widget works here too.
 | **Prompt library** | Reusable prompt snippets you can insert into the focused agent, drag onto any agent, or manage; persisted like layout templates |
 | **Canvas search** | ⌘/Ctrl-F to search every element's text (titles, notes, paths, URLs, prompts, frame names) and jump to it |
 | **Follow active agent** | A headless camera mode that pans to whichever agent most recently started working |
-| **Settings** | Six colour palettes and the keys that open the tab finder (Emacs on by default; Vim and your own shortcuts are opt-in) |
+| **Settings** | Six colour palettes, text size, and the keys that open the tab finder (Emacs on by default; Vim and your own shortcuts are opt-in) |
 | **Arrange** | Group, lock, align, distribute, tidy, copy/paste/duplicate, z-order, snapping guides; arrange terminals by label colour or by folder |
 | **Right-click menus** | Canvas elements (duplicate, copy, lock, group, z-order, delete), agents (track, open transcript, label), file-tree rows (open in the editor or a viewer, open with the default app, **reveal in Explorer/Finder**, copy path), tabs (pin, rename, close), empty canvas (paste, select all, reveal folder) |
+| **Layers** | A stack of planes per tab, each optionally its own project folder with its own view; `L` opens a tilted overview of every layer with live agent status, and hidden layers keep running |
 | **Tabs** | Multiple `.ccnvs` workspaces open at once, each bound to its own folder; drag to reorder, pin the ones you keep, jump with the tab finder |
 | **Persistence** | Save/Open into the canvas folder (backend) or File System Access API; reusable widget-layout templates; PNG/SVG export |
+
+<img src="docs/divider.svg" alt="" width="100%" height="20" />
+
+## Web pages
+
+A **web** widget (quick insert `web`, alias `browser` `url` `site`; the
+command palette's *New: Web page*; or type an address into the palette) shows a
+page under a browser-style bar: back, forward, reload, a rounded address field
+(the site's icon, its host and then the rest of the path, with a thin line
+along the bottom while a page loads), a local `.html` file (live-reloads on
+save) and ↗ to open it in your browser. Type an address (`example.com`,
+`localhost:3000`, `3000`, an IP, `./index.html`) to go there; anything else
+searches Google.
+- **Its card shows the site.** Zoomed out, in the layers overview and in its
+  title bar, a web widget shows the icon of the page it's on now (YouTube's,
+  GitHub's…), fetched from the site itself (never a third-party icon service)
+  and cached per site. Now playing shows Spotify's or Music's icon, VS Code
+  its own, Claude chats and agents Claude's, and the GitHub widgets GitHub's
+  mark, each still ringed by its status (working, needs you, done).
+
+- **On the canvas it's a preview.** Local dev servers (`localhost:5173`) embed
+  directly. Other sites load through a small proxy that strips the headers that
+  stop them being framed, so they show, but without your cookies or logins and
+  with some pages half-working. A quiet *preview* tag in the bar says so.
+- **Focus it (⌘⇧↵) for the real browser** (desktop app). The address bar moves
+  into the focus strip and a native webview fills everything under it: logins, scripts and everything else work, and every
+  web widget shares one profile, so you stay signed in. Links stay in the view;
+  a link that opens a new window opens it in a new web widget beside this one
+  and focuses that. ⌘⇧↵ inside the page goes back to the canvas, and the widget
+  keeps the page you were on (only the URL is saved in the `.ccnvs`).
+- Being native, that view is drawn above the page, so it hides while a menu, the
+  command palette or anything else is over it, and it only exists in focus
+  mode, where nothing moves. In the browser build, focus mode shows the preview
+  with a note instead.
+
+- **Sign-ins stay.** Every web widget's browser shares one persistent store
+  of its own (macOS 14+), apart from the app, so signing in once keeps you
+  signed in across widgets and relaunches. *Settings → Web sign-ins → Sign out of all
+  sites* clears it.
+
+Safety: the native view gets no access to ccanvas (no Tauri IPC or
+permissions, http(s) only, never the app's own origin). The preview proxy runs
+on its own loopback port (built into the desktop app; `npm run server` provides
+it for the browser build) and refuses local and private-network addresses, so a
+proxied page can't reach anything on your machine. The desktop app's also checks
+what a name resolves to and where each redirect goes.
 
 <img src="docs/divider.svg" alt="" width="100%" height="20" />
 
@@ -208,6 +265,131 @@ three features are the answer at scale:
 - **Follow the active agent** (command palette → *Follow the active agent*): a
   lightweight mode that just pans to whichever agent most recently started
   working. It stands down while the tracking camera is active.
+
+### Mirroring Claude desktop-app sessions
+
+If you run Claude Code chats in the Claude desktop app, you can watch them on
+the canvas alongside your own agents. Open **Desktop sessions** (the monitor
+button beside **Agents** in the top bar, or command palette → *Desktop
+sessions*). It lists every session the desktop app knows about, newest first,
+with its folder, model and a dot that pulses while the session is running (its
+transcript was written in the last 30 seconds). Filter by title, folder or
+model; archived sessions are hidden unless you untick *hide archived*. Tick
+some and press **Add**, or press **Add all running**. Each becomes a mirror
+on the active canvas (sessions already mirrored there are skipped).
+
+A mirror is a transcript widget with a **Desktop** badge. It follows the
+session live, picks up renames, and shows its context fill, both on the widget
+and in the Agents roster. It is **read-only**: there is no composer and no
+compact button, and ccanvas never runs `claude --resume` on a mirrored session,
+because a second writer would split the desktop app's transcript. To take a
+session somewhere else, right-click the mirror → **Fork into terminal**. That
+opens a terminal in the session's folder running
+`claude --resume <id> --fork-session`, which continues from a copy under a new
+session id. Mirrors save with the workspace; if a session's transcript is gone
+when you reopen, the mirror says so.
+
+To reply, answer a question or approve a tool, use the arrow button in the
+mirror's title bar (or right-click → **Open in Claude app**). It opens that
+exact chat in the desktop app. When Claude asks you something, the mirror and
+its roster row show **Needs you**, and the question and its options appear
+under the transcript. When a tool call has had no result for 10 seconds, a
+**Bash?**-style chip appears: it is waiting for your approval or still
+running, and the transcript can't tell which.
+
+Every transcript widget (mirrors and your own agents' transcripts) also has:
+
+- **Cost**: `≈$12.40` in the bar is what the session's tokens would cost at
+  Claude API list prices (hover for each model's share). On a subscription
+  it's an API-equivalent estimate, not a bill. The usage pill's popover adds
+  up every agent and mirror on the canvas.
+- **Files changed**: the `✎ 15` chip lists the files the session's Edit and
+  Write calls changed, newest first. Click one to open it beside the
+  transcript, or open the git panel for the session's folder.
+- **Prompt jumps**: `⌃` / `⌄` (or ⌥↑ / ⌥↓ with the transcript focused) move
+  between the prompts you typed.
+- **Copy**: the `⋯` menu copies the last reply, or the chat as Markdown. For a
+  transcript too large to load whole, it offers to read the full file once.
+- **Subagent work**: open a Task row and press *Show the subagent's work* to
+  read that subagent's own log inside it. It's loaded only then, followed
+  only while it's shown, and dropped when you hide it.
+
+This reads the desktop app's internal, undocumented session files
+(`~/Library/Application Support/Claude/claude-code-sessions/`). It works only
+in the macOS desktop build, and a change to that format would break discovery
+(all of that parsing lives in `src-tauri/src/desktop_sessions.rs`).
+
+## Layers
+
+A tab can hold a stack of **layers**. Use them to keep several projects, or
+several groups of agents, on one canvas without them crowding each other.
+
+- **Make one.** Right-click empty canvas → *New layer…*, press `N` in the
+  overview, or right-click a widget → *Move to new layer…*. Each opens the
+  same folder picker as the folder chip: the layer becomes that project, named
+  after the folder. Cancel the picker for a plain layer in the tab's folder.
+- **Each layer is its own project.** New terminals, agents, file trees, git
+  panels and editors open in the layer's folder (falling back to the tab's).
+  The folder chip shows and sets the current layer's folder when it has one,
+  and each layer remembers its own view, so switching returns you to where
+  you were.
+- **Switch.** Press `L` (or `⌃⌘↑` from anywhere, even inside a terminal) to
+  open the layers overview: each widget dims to a tile where it stands (its
+  title bar doesn't change), then the canvas settles back into an accordion of
+  every layer around the one you're on, which faces you while the rest fold
+  into thin slats above and below it, higher layers higher up. As it
+  settles, the tiles' text fades in down the sheet. Hover,
+  scroll or press `↑` / `↓` to roll the accordion through the stack, then
+  click a sheet or slat, press `⏎`, or press its digit to dive in: the text
+  fades out, the sheet eases flat onto the canvas, its name
+  glides into the layer chip, and its tiles, landed as cards, crossfade into
+  the live widgets. `Esc` or `L` goes back the same way,
+  and `L` turns the move around at any point, so tapping it quickly goes in
+  and out from wherever it is. `⌥↑` / `⌥↓` and `⌥1`–`⌥9` switch
+  instantly.
+- **See what's where.** Each sheet draws its widgets as tiles where they sit.
+  The open sheet's tiles show the status icon (a spinner while an agent
+  works, amber when it needs you, a check when it's just done), a two-line
+  name, the widget's type and its last line; `V` switches them to a few
+  lines of each widget. Slats show just coloured blocks (working tinted,
+  waiting amber), and a layer with an agent waiting on you gets an amber
+  edge. Text only ever shows on a sheet that's nearly flat, so it's never
+  skewed. The rail names every layer on one line, and the open one on two,
+  with its folder and how many agents are working or need you. The layer
+  chip shows an amber dot when an agent on another layer is waiting on you.
+- **Find across layers.** `/` in the overview filters every sheet as you type
+  (title, type, path, folder, URL); the rail says where the matches are, and
+  `⏎` dives to the first one with it selected.
+- **Move widgets.** Drag a tile onto another sheet or its label in the rail,
+  right-click → *Move to 02 · name*, or press `⇧⌥↑` / `⇧⌥↓` to send the
+  selection a layer up or down (you stay where you are). A widget keeps its
+  position and its folder (a running terminal can't change directory); the
+  overview marks it with its home folder.
+- **Arrange the stack.** In the overview, `⇧↑` / `⇧↓` move the open layer
+  up or down, `R` renames it, and `del` removes it: its widgets merge into the
+  layer below, and nothing closes (a layer with widgets asks twice; `⌘Z` puts
+  them back on a layer of their own). The base layer stays.
+- **Desktop mirrors sort themselves.** *Add* in the Desktop sessions panel puts
+  each mirror on the layer whose folder holds that session's folder, and on
+  the current layer otherwise.
+- **Nothing stops.** Widgets on hidden layers stay mounted, so their agents,
+  shells and mirrors keep running and the roster, attention inbox and search
+  still see them. Clicking one of those jumps to its layer first. Switching
+  layers always drops keyboard focus, so typing never reaches a terminal you
+  can't see, and `⌘1`–`⌘9`, `⌘W` and `⌘A` act on the current layer only.
+- **Saved in the canvas file.** One `.ccnvs` holds every layer. A canvas with
+  a single layer saves exactly as before. An older build opens a layered file
+  with everything on one plane, but saving it there drops the layers' names,
+  folders and cameras.
+
+The right-click menu on the layer chip (`≡ 02 WEBAPP`, shown once a tab has two
+layers) adds a layer, sets or clears its folder, and renames it.
+
+The overview is mounted only while it's open. One number, the open
+position, follows a spring and drives every sheet; only transforms and
+opacity change, and its frame loop stops when the accordion is at rest. With
+reduced motion it crossfades instead of flying. `npm test` runs the layer model's unit tests,
+including the accordion's geometry.
 
 ## Safety net: checkpoints
 
@@ -241,21 +423,30 @@ terminal untouched; on Windows and Linux they use Ctrl.
 | ⌘/Ctrl + `T` / `Shift T` | new terminal · new Claude agent |
 | ⌘/Ctrl + `Shift V` | new VS Code widget for this canvas's folder |
 | hold ⌘ | show the jump-number on every terminal |
-| ⌘/Ctrl + `1`–`9` | jump to and focus the Nth terminal or agent |
+| ⌘/Ctrl + `1`–`9` | jump to and focus the Nth terminal or agent on the current layer |
 | ⌘/Ctrl + `Shift ]` / `[` | next · previous terminal |
 | ⌘/Ctrl + `Esc` | leave the focused terminal |
-| ⌘/Ctrl + `W` | close the focused widget (desktop app; quits when no tab has a widget left) |
+| ⌘/Ctrl + `Shift ↵` · `F` | focus mode: the widget you're in (or the selected one) fills the window under a single bar (its name, controls and, for a web page, the address bar); again, `Esc`, or a click on the dimmed board to go back. While focused, ⌘1–9, ⌘⇧]/[ and the strip's numbers switch which widget is focused |
+| `S` · `U` | stack the selected widgets · unstack the selected stack |
+| `Space` · `⌥Space` | spread the selected stack · spread the stack you're typing in |
+| `[` / `]` · ⌃`⇥` | switch a stack's front widget (⌃⇥ works inside it too) |
+| ⌘/Ctrl + `W` | close the focused widget on the current layer (desktop app; quits when no tab has a widget left) |
+| `L` · ⌃⌘`↑` | layers overview (`⌃⌘↑` works inside a terminal too) |
+| `⌥↑` / `⌥↓` · `⌥1`–`⌥9` | layer up / down · jump to layer N |
+| `⇧⌥↑` / `⇧⌥↓` | send the selection one layer up / down |
+| in the overview: `↑` `↓` · `⏎` · `1`–`9` · `/` · `N` · `R` · `del` | move · dive in · jump · find · new layer · rename · remove |
+| in the overview: `⇧↑` `⇧↓` · `V` · `Esc` | reorder · tiles/cards · back |
 | ⌘/Ctrl + `Z` / `Shift Z` | undo · redo |
 | ⌘/Ctrl + `C` / `X` / `V` / `D` | copy · cut · paste · duplicate |
 | ⌘/Ctrl + `G` / `Shift G` | group · ungroup |
 | ⌘/Ctrl + `L` | lock / unlock selection |
 | ⌘/Ctrl + `[` / `]` | send to back / bring to front |
-| ⌘/Ctrl + `A` | select all |
+| ⌘/Ctrl + `A` | select all on the current layer |
 | ⌘/Ctrl + `0` `+` `-` | 100% / zoom in / zoom out |
 | `\` | zoom to the selection, or fit everything |
-| `Delete` / `Backspace` | delete selection |
+| `Delete` / `Backspace` | delete the selected drawings, text, frames and images (never a widget: close those with ✕ or Delete in the right-click menu) |
 | `Esc` | clear the selection |
-| click | use a terminal, agent, editor, or other live widget |
+| drag · click | move a widget you haven't clicked into · click into it to use it |
 | double-click | rename a widget or tab · edit text |
 
 ## Stack
@@ -294,7 +485,9 @@ backend.
   streaming `pty:data`/`pty:exit` events), `src/transcript.rs` (per-agent
   transcript summaries that parse only what was appended since the last poll),
   `src/usage.rs` and `src/plan_usage.rs` (the usage pill), `src/editor.rs` (the
-  VS Code `serve-web` process + local proxy), `src/term_profile.rs` (reads the
+  VS Code `serve-web` process + local proxy), `src/web_proxy.rs` (the web
+  widget's canvas preview), `src/native_view.rs` with `src/lib/nativeView.ts`
+  (the real browser over a focused web widget), `src/term_profile.rs` (reads the
   host terminal's theme), and `src/files.rs` (native dialogs + fs; reads, `git`,
   and directory listings run off the main thread).
 - **`server/pty-server.mjs`**: the optional web-mode backend (same protocol, over

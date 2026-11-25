@@ -11,7 +11,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { isTauri } from './backend'
+import { isTauri, backendToken } from './backend'
 
 export type Term = {
   /** true when we re-attached to an already-running shell (it survived a
@@ -98,7 +98,17 @@ async function connectTauri(opts: PtyOpts, h: PtyHandlers): Promise<Term | null>
         if (opts.launch && !reused) void invoke('pty_write', { id: opts.id, data: opts.launch + '\r' })
       },
       send: (data) => void invoke('pty_write', { id: opts.id, data }),
-      resize: (cols, rows) => void invoke('pty_resize', { id: opts.id, cols, rows }),
+      // only a real change goes over IPC (a terminal re-fits every time it is
+      // shown, mostly to the size it already has)
+      resize: (() => {
+        let last = ''
+        return (cols: number, rows: number) => {
+          const key = `${cols}x${rows}`
+          if (key === last) return
+          last = key
+          void invoke('pty_resize', { id: opts.id, cols, rows })
+        }
+      })(),
       close: () => {
         offData()
         offExit()
@@ -111,12 +121,17 @@ async function connectTauri(opts: PtyOpts, h: PtyHandlers): Promise<Term | null>
   }
 }
 
-function connectWebSocket(opts: PtyOpts, h: PtyHandlers): Promise<Term | null> {
+async function connectWebSocket(opts: PtyOpts, h: PtyHandlers): Promise<Term | null> {
+  // the bridge refuses sockets without its token; re-read it in case the
+  // backend restarted since we last asked
+  const token = await backendToken(true)
+  if (!token) return null
   return new Promise((resolve) => {
     let ws: WebSocket
     const query =
       `?id=${encodeURIComponent(opts.id)}&cols=${opts.cols}&rows=${opts.rows}` +
-      (opts.cwd ? `&cwd=${encodeURIComponent(opts.cwd)}` : '')
+      (opts.cwd ? `&cwd=${encodeURIComponent(opts.cwd)}` : '') +
+      `&token=${encodeURIComponent(token)}`
     try {
       ws = new WebSocket(WS_URL + query)
     } catch {
