@@ -43,6 +43,18 @@ npm run build      # type-check + bundle the web app into dist/
 npm run app:build  # produce native installers in src-tauri/target/release/bundle
 ```
 
+A release build checks for new official releases and offers to install them.
+If you build the desktop app from a fork or a branch for your own use, turn
+that off so it isn't replaced: put `VITE_NO_UPDATE_CHECK=1` in a `.env.local`
+at the repo root (gitignored), or set it in the environment for the build.
+
+Working on the layers overview's motion: in a dev build (`npm run dev` /
+`npm run app`), `P` in the overview shows a frame readout and `⇧P` runs a
+short open/close benchmark (keep the window in front; background windows
+throttle frames). Setting `localStorage['ccanvas:layers:slow']` to a factor
+such as `4` slows the motion down. Release builds leave these out unless
+built with `VITE_PERF_TOOLS=1`.
+
 ## Project layout
 
 | Path                     | What lives there                                                |
@@ -68,6 +80,7 @@ for how the pieces fit together.
    `npm run build` passes before opening a PR.
 4. If you touch Rust, run `cargo fmt` and `cargo clippy` inside `src-tauri/`.
 5. Write a clear commit message describing the *why*, not just the *what*.
+
 
 ## Opening a pull request
 

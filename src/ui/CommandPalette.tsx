@@ -4,10 +4,11 @@ import { useStore, selectActive } from '../store/workspace'
 import { screenToWorld } from '../lib/geometry'
 import { elementBounds } from '../lib/geometry'
 import { downloadPng, downloadSvg } from '../lib/export'
-import { runCommand, joinPath } from '../lib/backend'
+import { desktopMirrorsSupported, runCommand, joinPath } from '../lib/backend'
 import { sendPrompt, isLive } from '../lib/agents'
 import type { CanvasElement, WidgetKind } from '../lib/types'
 import { AGENT_COLORS } from '../lib/types'
+import { hostOf, looksLikeUrl, normalizeUrl } from '../lib/weburl'
 
 /** The focused/selected agent or terminal a prompt insert should target. */
 function injectTargetId(): string | null {
@@ -34,6 +35,8 @@ type Item = {
   hint?: string
   group: string
   run: () => void
+  /** extra search words, not shown */
+  keywords?: string
   /** switch the palette into this scope instead of running + closing */
   mode?: Scope
 }
@@ -70,7 +73,7 @@ function createNote(text: string) {
   s.spawnWidget('note', w.x, w.y, text ? { note: text } : undefined)
 }
 
-const SPAWNABLE: { kind: WidgetKind; label: string }[] = [
+const SPAWNABLE: { kind: WidgetKind; label: string; keywords?: string }[] = [
   { kind: 'agent', label: 'Claude agent' },
   { kind: 'terminal', label: 'Terminal' },
   { kind: 'files', label: 'File tree' },
@@ -78,6 +81,8 @@ const SPAWNABLE: { kind: WidgetKind; label: string }[] = [
   { kind: 'editor', label: 'Editor' },
   { kind: 'vscode', label: 'VS Code' },
   { kind: 'note', label: 'Note' },
+  { kind: 'web', label: 'Web page', keywords: 'browser url site' },
+  { kind: 'nowplaying', label: 'Now playing', keywords: 'music spotify song' },
 ]
 
 const AGENT_MODELS = ['opus', 'sonnet', 'haiku']
@@ -105,12 +110,13 @@ export function CommandPalette() {
     const ws = selectActive(s)
     const out: Item[] = []
 
-    for (const { kind, label } of SPAWNABLE) {
+    for (const { kind, label, keywords } of SPAWNABLE) {
       out.push({
         id: `spawn-${kind}`,
         label: `New: ${label}`,
         hint: kind === 'vscode' ? '⌘⇧V' : 'widget',
         group: 'Create',
+        keywords,
         run: () => {
           const w = worldCenter()
           if (kind === 'agent') s.openAgentWizard({ x: w.x, y: w.y })
@@ -285,6 +291,17 @@ export function CommandPalette() {
         group: 'Panels',
         run: () => s.setOpenPanel('roster'),
       },
+      ...(desktopMirrorsSupported()
+        ? [
+            {
+              id: 'panel-desktop',
+              label: 'Desktop sessions',
+              hint: 'mirror Claude desktop-app chats',
+              group: 'Panels',
+              run: () => s.setOpenPanel('desktop'),
+            },
+          ]
+        : []),
       {
         id: 'panel-prompts',
         label: 'Prompt library',
@@ -375,6 +392,8 @@ export function CommandPalette() {
         y: viewCenter().y - cy * cam.zoom,
       })
       s.setSelection([el.id])
+      // on top of anything it overlaps
+      s.bringToFront([el.id])
     }
     for (const el of ws.elements)
       if (el.type === 'widget')
@@ -418,9 +437,23 @@ export function CommandPalette() {
       const sc = scopeOf(it)
       // notes only surface inside the notes scope (`rnotes`)
       if (scope === 'all' ? sc === 'notes' : sc !== scope) return false
-      const hay = (it.label + ' ' + it.group + ' ' + (it.hint ?? '')).toLowerCase()
+      const hay = (it.label + ' ' + it.group + ' ' + (it.hint ?? '') + ' ' + (it.keywords ?? '')).toLowerCase()
       return terms.every((term) => hay.includes(term))
     })
+    // an address typed into the palette opens it in a web widget
+    if (scope === 'all' && looksLikeUrl(q)) {
+      const url = normalizeUrl(q)
+      list.unshift({
+        id: 'web-open',
+        label: `Open ${url}`,
+        hint: 'web',
+        group: 'Create',
+        run: () => {
+          const w = worldCenter()
+          useStore.getState().spawnWidget('web', w.x, w.y, { url, title: hostOf(url) })
+        },
+      })
+    }
     if (scope === 'notes') {
       const text = q.trim()
       list.unshift({

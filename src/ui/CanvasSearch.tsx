@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { viewCenter } from '../lib/view'
+import { viewCenter, revealLayerOf } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { elementBounds } from '../lib/geometry'
 import type { CanvasElement } from '../lib/types'
@@ -85,7 +85,8 @@ export function CanvasSearch() {
     const el = ws.elements.find((e) => e.id === hit.id)
     if (el) {
       const b = elementBounds(el)
-      const cam = ws.camera
+      revealLayerOf(el.id)
+      const cam = selectActive(useStore.getState()).camera
       const cx = b.x + b.w / 2
       const cy = b.y + b.h / 2
       setCamera({

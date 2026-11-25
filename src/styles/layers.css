@@ -1,0 +1,877 @@
+/* ============================================================
+   Layers overview (ui/LayerOverview.tsx): the accordion. Every layer is a canvas-sized sheet
+   with its own 3D transform, written per frame by the overview's loop; only
+   transforms and opacities change, and nothing here transitions anything
+   else. No backdrop-filter and no filter.
+   ============================================================ */
+
+/* while the overview is up the live canvas stays mounted but unpainted */
+.canvas--overview .canvas__world,
+.canvas--overview .canvas__vectors,
+.canvas--overview .overlay {
+  visibility: hidden;
+}
+
+/* a widget on another layer: hidden per card, still mounted and running */
+.widget.widget--offlayer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.lo {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* the backdrop is the canvas (same colour and grid, aligned to its camera),
+   so dropping it in over the live canvas is invisible */
+.lo-bg {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background-color: var(--bg);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M7 1v12M1 7h12' stroke='rgb(250,249,245)' stroke-opacity='0.09' stroke-width='1'/%3E%3C/svg%3E"),
+    radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 140px 140px, 28px 28px;
+  background-position: -7px -7px, 0 0;
+}
+/* perspective and its origin are set per layout (OvLayout.persp / ox / oy) */
+.lo-view {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ---------- a sheet: the whole canvas, shown at the layout's scale ----------
+   --sk is 1 / scale, so hairlines and radii stay screen-sized */
+.lo-sheet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 50%;
+  border-radius: calc(14px * var(--sk, 2));
+  backface-visibility: hidden;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.lo:not(.lo--live) .lo-sheet,
+.lo:not(.lo--live) .lr {
+  pointer-events: none;
+}
+/* the dark the face fades toward with distance (its opacity is 1 − shade) */
+.lo-base {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 35%, #000);
+}
+.lo-face {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* its own layer: the shade changes every frame of a roll without a repaint */
+  will-change: opacity;
+}
+.lo-glass {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-hi) 80%, var(--bg)),
+    color-mix(in srgb, var(--panel) 92%, var(--bg))
+  );
+  border: calc(1px * var(--sk, 2)) solid var(--line-hard);
+  box-shadow: inset 0 calc(1px * var(--sk, 2)) 0 rgba(255, 255, 255, 0.05);
+}
+/* the open sheet's accent edge: its own element, so it fades in and out
+   with the opening, closing and a dive (opacity per frame) instead of
+   switching. No layer of its own: one per sheet, canvas-sized, would all be
+   allocated on the overview's first frame. */
+.lo-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: calc(1px * var(--sk, 2)) solid color-mix(in srgb, var(--accent) 70%, var(--line-hard));
+  box-shadow: 0 0 0 calc(1px * var(--sk, 2)) color-mix(in srgb, var(--accent) 25%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+/* The shadow under a sheet is a gradient, not a blurred box-shadow: a sheet
+   is the whole canvas scaled down, so a blur sized for the screen is ~2.5×
+   wider on the sheet, and any repaint (the opening, a roll) redrew it. Its
+   opacity is written as it changes (deeper under the open sheet, none while
+   a sheet is the canvas). */
+.lo-shadow {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  top: 12%;
+  bottom: -9%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.22) 62%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+/* a sheet's content moving on its own gets a layer for that time only */
+.lo-world.is-flying {
+  will-change: transform;
+}
+.lo-sheet.is-drop .lo-glass {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+/* a layer with an agent waiting on you: an amber edge while it's a slat */
+.lo-attn {
+  position: absolute;
+  inset: calc(-1px * var(--sk, 2));
+  border-radius: inherit;
+  border: calc(1.5px * var(--sk, 2)) solid var(--led-waiting);
+  opacity: 0;
+  pointer-events: none;
+}
+.lo-sheet.has-waiting:not(.is-open) .lo-attn {
+  opacity: 0.75;
+}
+.lo-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+/* landing: images give way to the real canvas (a stand-in is a grey box);
+   frames and free text are drawn like the canvas's own, so they stay */
+.lo-sheet.is-handover .pc-image {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+/* ---------- tiles: a widget at its own position and size ----------
+   Three faces (see LayerProxy): the block (.pt__fill), the text (screen-sized
+   through --fs, faded by the sheet's --txt), and the widget look (--m: the
+   real widget's body, frame and title bar, crossfaded over the block); --w
+   is the text's wash. Landing, the whole sheet's content crossfades into the
+   real widgets under it (one opacity, LayerOverview). */
+.pt {
+  position: absolute;
+  --m: 0;
+  --w: 1;
+  --dim: 1;
+  --k2: var(--accent);
+  opacity: var(--dim);
+}
+.pt__fill,
+.pt__real {
+  position: absolute;
+  inset: 0;
+}
+.pt__fill {
+  border-radius: calc(7px / var(--fs, 1));
+  background: var(--lamp);
+  border: calc(1px / var(--fs, 1)) solid var(--lamp-edge);
+  opacity: calc(1 - var(--m));
+}
+/* the widget's frame, its body still the lamp: the card that lands on the
+   canvas and crossfades into the real widget */
+.pt__real {
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--lamp);
+  opacity: var(--m);
+}
+.pt--tagged .pt__real {
+  border-color: color-mix(in srgb, var(--k2) 45%, var(--line));
+}
+.pt__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-bottom-color: var(--line-soft);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  opacity: var(--m);
+  pointer-events: none;
+}
+/* a labelled terminal or agent: tinted like its real title bar */
+.pt--tagged .pt__bar {
+  background: color-mix(in srgb, var(--k2) 24%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--k2) 45%, var(--line));
+  border-bottom-color: var(--line-soft);
+}
+.pt--tagged .pt__bt {
+  color: color-mix(in srgb, var(--k2) 25%, var(--ink));
+}
+.pt__cwd {
+  flex: 0 1 auto;
+  max-width: 45%;
+  font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--ts));
+  color: var(--ink-ghost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pt__cwd::before {
+  content: '·';
+  margin-right: 6px;
+}
+.pt__bar .pt__ic {
+  width: 13px;
+  height: 13px;
+  color: var(--k2);
+}
+.pt__bt {
+  flex: 0 1 auto;
+  max-width: 55%;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: calc(13px * var(--ts));
+  font-weight: 600;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pt__ic {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+}
+.pt__ic svg {
+  width: 100%;
+  height: 100%;
+}
+.pt__txt {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* a tile showing only its glyph keeps no room for the hidden lines, so
+     the glyph sits in the middle */
+  gap: calc(var(--on-name) * 3px / var(--fs, 1));
+  padding: calc(var(--on-name) * 9px / var(--fs, 1)) calc(var(--on-name) * 10px / var(--fs, 1));
+  text-align: center;
+  color: var(--lamp-ink);
+  overflow: hidden;
+  opacity: calc(var(--txt, 0) * var(--w, 1));
+  pointer-events: none;
+  /* --tz: the world's counter-scale while the sheet grows to the canvas */
+  transform: scale(var(--tz, 1));
+  transform-origin: 0 0;
+}
+.pt__top {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  gap: calc(var(--on-name) * 5px / var(--fs, 1));
+  align-items: center;
+  opacity: calc(1 - var(--m));
+  transform: translateY(calc(var(--m) * -3px / var(--fs, 1))) scale(calc(1 - var(--m) * 0.08));
+  transform-origin: 50% 0;
+}
+/* the glyph: about a fifth of the tile's height, 12 to 26 screen px; on a
+   tile too small for its name it is all there is, so it is larger (up to
+   two fifths of the tile, 14 to 40 screen px), centred */
+.pt__top .pt__ic {
+  --gs: calc(
+    var(--on-name) * clamp(12px / var(--fs, 1), var(--th) * 0.2px, 26px / var(--fs, 1)) +
+      (1 - var(--on-name)) * clamp(14px / var(--fs, 1), min(var(--tw), var(--th)) * 0.5px, 40px / var(--fs, 1))
+  );
+  width: var(--gs);
+  height: var(--gs);
+}
+/* a site's or app's own icon carries its own margin: a little larger */
+.pt__top .pt__ic.status-icon--brand {
+  width: calc(var(--gs) * 1.25);
+  height: calc(var(--gs) * 1.25);
+}
+.pt[data-st='kind'] .pt__top .pt__ic {
+  color: color-mix(in srgb, var(--k) 72%, var(--ink));
+}
+/* Tiers by the tile's size on screen, as on the far card: the glyph alone
+   on a small tile, the name from about 64×40, the status line from about
+   110×70. A hidden line is sized to nothing (a tile can't be a size
+   container: its own size is in world units). */
+.pt {
+  --sw: calc(var(--tw) * var(--fs, 1));
+  --sh: calc(var(--th) * var(--fs, 1));
+  --on-name: clamp(0, min(var(--sw) - 64, var(--sh) - 40) * 1000, 1);
+}
+.pt__tt {
+  --on: var(--on-name);
+}
+.pt__tm {
+  --on: clamp(0, min(var(--sw) - 110, var(--sh) - 70) * 1000, 1);
+}
+/* the name, fitted like the far card's (global.css): one line while that is
+   readable, else two or three, as large as the tile allows; never cut short
+   with an ellipsis, and never broken inside a word */
+.pt__tt {
+  --nw: calc(var(--tw) * 1px - min(20px / var(--fs, 1), var(--tw) * 0.16px));
+  --nh: calc(var(--th) * 0.42px);
+  --cw: calc(var(--chars) * 0.54);
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--font-label);
+  font-size: calc(
+    var(--on) *
+      clamp(
+        8px * var(--ts) / var(--fs, 1),
+        min(
+          max(
+            min(var(--nw) / (var(--chars) * 0.56), var(--nh) / 1.15),
+            min(
+              max(min(var(--nw) * 1.7 / var(--cw), var(--nh) / 2.3), min(var(--nw) * 2.4 / var(--cw), var(--nh) / 3.45)),
+              16px * var(--ts) / var(--fs, 1)
+            )
+          ),
+          var(--nw) / (var(--lw, 8) * 0.58)
+        ),
+        24px * var(--ts) / var(--fs, 1)
+      )
+  );
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+}
+.pt__tt > i {
+  display: block;
+  max-height: calc(3 * 1.15em);
+  overflow: hidden;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}
+.pt__tm,
+.pt__tl {
+  position: relative;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: calc(var(--on, 1) * 11.5px * var(--ts) / 1.1 / var(--fs, 1));
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: clamp(0, 1 - var(--m) * 1.6, 1);
+}
+.pt__tm {
+  color: color-mix(in srgb, var(--lamp-ink) 80%, transparent);
+}
+.pt__tls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  margin-top: calc(var(--on-name) * 4px / var(--fs, 1));
+}
+.pt__tl {
+  color: color-mix(in srgb, var(--lamp-ink) 60%, transparent);
+}
+.pt__tt > i,
+.pt__tm > i,
+.pt__tl > i {
+  font-style: normal;
+}
+.pt__tm > i,
+.pt__tl > i {
+  display: block;
+  overflow: hidden;
+}
+
+/* The wash (--w, 0 → 1, one value per tile, staggered in reading order by
+   the overview) fades a tile's text in as the deck settles, and out as it
+   leaves: opacity only, nothing typed or clipped. */
+/* the spinner turns only on the open sheet (a moving part inside a slat
+   would repaint it every frame) */
+.lo-sheet:not(.is-open) .pt .status-icon svg {
+  animation-play-state: paused;
+}
+/* on the solid amber lamp, the glyph is drawn in the lamp's ink */
+.pt[data-st='waiting'] .pt__txt .status-icon__fill {
+  fill: var(--on-amber);
+}
+.pt[data-st='waiting'] .pt__txt .status-icon__halo {
+  stroke: var(--on-amber);
+  stroke-opacity: 0.5;
+}
+.lo-sheet .pt .status-icon--waiting::after {
+  display: none;
+}
+/* find (/): non-matching widgets fade */
+.pt.is-dim {
+  --dim: 0.18;
+}
+.pt.is-lifted {
+  --dim: 0.25;
+}
+
+/* ---------- the rail: flat, fixed width, one label per sheet ----------
+   A slat's label is one line; the open layer's is two, plus its folder and
+   status counts. Positioned per frame (transform only). */
+.lo-rail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.lr {
+  position: absolute;
+  left: 16px;
+  top: 0;
+  width: var(--lr-w, 214px);
+  display: grid;
+  grid-template-columns: calc(26px * var(--ts) / 1.1) minmax(0, 1fr);
+  gap: 0 8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  will-change: transform, opacity;
+}
+.lr.is-open {
+  padding: 6px 8px;
+}
+.lr:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+.lr.is-drop {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.lr__n {
+  font-family: var(--font-mono);
+  font-size: calc(12.5px * var(--ts) / 1.1);
+  font-weight: 600;
+  color: var(--ink-ghost);
+  padding-top: 1px;
+}
+.lr__nm {
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: calc(13.5px * var(--ts) / 1.1);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink-faint);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.lr.is-open .lr__n {
+  color: var(--accent);
+}
+.lr.is-open .lr__nm {
+  color: var(--ink);
+  -webkit-line-clamp: 2;
+  font-size: calc(15px * var(--ts) / 1.1);
+}
+.lr.has-waiting:not(.is-open) .lr__n {
+  color: var(--led-waiting);
+}
+.lr__here {
+  margin-left: 6px;
+  font-size: calc(11px * var(--ts) / 1.1);
+  font-weight: 500;
+  color: var(--accent);
+}
+.lr__dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: 2px;
+  border-radius: 50%;
+  background: var(--led-waiting);
+}
+.lr__hits {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ts) / 1.1);
+  font-weight: 500;
+  color: var(--accent-bright);
+}
+.lr.is-open .lr__hits {
+  display: none;
+}
+.lr.no-hits:not(.is-open) .lr__nm {
+  color: var(--ink-ghost);
+}
+.lr__sub,
+.lr__sum {
+  grid-column: 2;
+  display: none;
+}
+.lr.is-open .lr__sub {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: calc(11.5px * var(--ts) / 1.1);
+  color: var(--ink-ghost);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.lr.is-open .lr__sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: calc(11.5px * var(--ts) / 1.1);
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+.lr__sum > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lr__sum .status-icon {
+  width: 11px;
+  height: 11px;
+}
+.lr__w {
+  color: var(--led-waiting);
+}
+.lr__d {
+  color: var(--led-done);
+}
+.lr__found {
+  color: var(--accent-bright);
+}
+.lr__input {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 0;
+  border-radius: 3px;
+  padding: 0 3px;
+  box-shadow: 0 0 0 1px var(--accent-line);
+  outline: none;
+}
+/* a leader from each label to its sheet's left edge (100px, scaled per frame) */
+.lr-lead {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line-hard), color-mix(in srgb, var(--line-hard) 30%, transparent));
+  transform-origin: 0 50%;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.lr-lead.is-open {
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 25%, transparent));
+}
+
+/* frames, text and images on a sheet, drawn like the canvas's own
+   (.frame-el, .text-el), so they stay put as the canvas hands over */
+.pc-frame {
+  position: absolute;
+  border: 1.5px dashed var(--line-hard);
+  border-radius: 10px;
+}
+.pc-frame span {
+  position: absolute;
+  left: 0;
+  top: -22px;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--ts));
+  font-weight: 500;
+  white-space: nowrap;
+}
+.pc-text {
+  position: absolute;
+  padding: 2px 3px;
+  white-space: pre;
+  font-family: var(--font-mono);
+  line-height: 1.35;
+}
+.pc-image {
+  position: absolute;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+/* ---------- quiet chrome: plain text, not buttons in boxes ---------- */
+.lo-head,
+.lo-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  opacity: 0;
+  pointer-events: none;
+}
+.lo-head {
+  top: 14px;
+}
+.lo-foot {
+  bottom: 14px;
+  justify-content: center;
+}
+.lo--live .lo-head,
+.lo--live .lo-foot {
+  pointer-events: auto;
+}
+.lo-head__t {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  font-size: calc(10.5px * var(--ts));
+  color: var(--ink-dim);
+}
+.lo-head__t svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ink-faint);
+}
+.lo-head__s {
+  font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--ts));
+  color: var(--ink-faint);
+}
+.lo-head__s b {
+  color: var(--ink-dim);
+  font-weight: 500;
+}
+.lo-head__s .lo-head__q {
+  color: var(--led-waiting);
+}
+.lo-head__sp {
+  flex: 1;
+}
+.lo-btn {
+  height: 22px;
+  padding: 0 7px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink-ghost);
+  font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--ts));
+  cursor: pointer;
+}
+.lo-btn:hover {
+  color: var(--ink-dim);
+  border-color: var(--line);
+}
+.lo-btn .kbd,
+.lo-keys .kbd {
+  opacity: 0.65;
+}
+.lo-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 16px;
+  color: var(--ink-ghost);
+  font-size: calc(10.5px * var(--ts));
+}
+.lo-keys > span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* ---------- top-bar layer chip: ≡ 02 WEBAPP ~/p/webapp ---------- */
+.tb-layer {
+  height: calc(24px * var(--ts));
+  max-width: calc(260px * var(--ts));
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ts));
+  cursor: pointer;
+}
+.tb-layer:hover {
+  color: var(--ink);
+  border-color: var(--line-hard);
+}
+.tb-layer svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.tb-layer__num {
+  color: var(--ink);
+  font-weight: 600;
+}
+.tb-layer__name {
+  /* the name keeps its room; a long folder path gives way first */
+  flex-shrink: 0;
+  max-width: calc(130px * var(--ts));
+  font-family: var(--font-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: calc(11.5px * var(--ts));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-layer__dir {
+  flex: 0 1 auto;
+  direction: rtl; /* ellipsis at the start: the project's own folder stays readable */
+  text-align: left;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.tb-layer__input {
+  width: calc(120px * var(--ts));
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 0;
+  border-radius: 3px;
+  padding: 0 3px;
+  box-shadow: 0 0 0 1px var(--accent-line);
+  outline: none;
+}
+
+/* perf readout (P in the overview): a dev aid, plain mono text */
+.lo-perf {
+  position: absolute;
+  right: 18px;
+  top: 44px;
+  max-width: 62%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: calc(10px * var(--ts));
+  color: var(--ink-faint);
+  text-align: right;
+  pointer-events: none;
+}
+
+/* a one-line note above the key hints (⌫ to confirm, the base layer stays) */
+.lo-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 44px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--ts));
+  color: var(--led-waiting);
+  pointer-events: none;
+}
+
+/* the chip's amber dot: an agent on another layer needs you */
+.tb-layer {
+  position: relative;
+}
+.tb-layer__led {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--led-waiting);
+  box-shadow: 0 0 0 2px var(--panel), 0 0 6px var(--led-waiting);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tb-layer__led {
+    animation: none;
+  }
+}
+
+/* dragging a tile to another layer: the ghost under the pointer */
+.lo-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--panel-hi);
+  border: 1px solid var(--accent-line);
+  box-shadow: var(--shadow-panel);
+  font-family: var(--font-label);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: calc(11px * var(--ts));
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.lo-ghost--on {
+  display: flex;
+}
+.lo-ghost em {
+  font-style: normal;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
+  color: var(--accent-bright);
+  font-size: calc(10.5px * var(--ts));
+}
+.lo-perf__sum {
+  color: var(--ink-dim);
+}
+
+/* find (/) */
+.lo-find {
+  width: calc(220px * var(--ts));
+  height: calc(22px * var(--ts));
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ts));
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  outline: none;
+}
+.lo-find::placeholder {
+  color: var(--ink-ghost);
+}

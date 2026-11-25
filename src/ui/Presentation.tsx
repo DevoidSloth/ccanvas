@@ -3,6 +3,7 @@ import { viewport } from '../lib/view'
 import { useStore, selectActive } from '../store/workspace'
 import { clamp } from '../lib/geometry'
 import type { FrameElement } from '../lib/types'
+import { activeLayerElements } from '../lib/layers'
 
 // Presentation mode: step through the canvas's frames like slides, zooming the
 // camera to each. Arrow keys / space navigate; Esc exits.
@@ -17,10 +18,10 @@ export function Presentation() {
 
   const frames = useMemo(
     () =>
-      ws.elements
+      activeLayerElements(ws)
         .filter((e): e is FrameElement => e.type === 'frame')
         .sort((a, b) => a.y - b.y || a.x - b.x),
-    [ws.elements],
+    [ws],
   )
 
   useEffect(() => {

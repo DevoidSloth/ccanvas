@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WidgetElement } from '../lib/types'
+import { livePlace } from '../lib/view'
 import { useStore } from '../store/workspace'
 import {
   pickPath,
@@ -316,7 +317,8 @@ export function VideoBody({ el, active }: { el: WidgetElement; active: boolean }
       if (!ctx) return
       ctx.drawImage(v, 0, 0, c.width, c.height)
       const url = c.toDataURL('image/png')
-      addImage(url, v.videoWidth, v.videoHeight, el.x + el.w + 60 + v.videoWidth / 4, el.y + el.h / 2)
+      const at = livePlace(el)
+      addImage(url, v.videoWidth, v.videoHeight, at.x + at.w + 60 + v.videoWidth / 4, at.y + at.h / 2)
     } catch {
       /* tainted canvas (cross-origin remote without CORS) — can't snapshot */
     }
@@ -611,7 +613,7 @@ export function VideoBody({ el, active }: { el: WidgetElement; active: boolean }
                 <button
                   className="video__ctl"
                   onClick={() =>
-                    spawnWidget('mediainfo', el.x + el.w + 210, el.y + 200, {
+                    spawnWidget('mediainfo', livePlace(el).x + el.w + 210, livePlace(el).y + 200, {
                       path: el.path,
                       url: el.url,
                       cwd: el.cwd,

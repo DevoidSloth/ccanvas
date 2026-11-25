@@ -119,7 +119,7 @@ fn url_for(port: u16, dir: &str) -> String {
 const SECRET_COOKIE: &str = "vscode-cli-secret-half";
 
 /// Read up to the end of an HTTP head. Returns (head, bytes read past it).
-fn read_head(s: &mut TcpStream) -> Option<(String, Vec<u8>)> {
+pub(crate) fn read_head(s: &mut TcpStream) -> Option<(String, Vec<u8>)> {
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     loop {
@@ -138,7 +138,7 @@ fn read_head(s: &mut TcpStream) -> Option<(String, Vec<u8>)> {
     }
 }
 
-fn header_name(line: &str) -> String {
+pub(crate) fn header_name(line: &str) -> String {
     line.split(':')
         .next()
         .unwrap_or("")

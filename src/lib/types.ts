@@ -36,6 +36,7 @@ export type WidgetKind =
   | 'video'
   | 'mediainfo'
   | 'claude'
+  | 'nowplaying'
 
 type Base = {
   id: string
@@ -51,6 +52,9 @@ type Base = {
   /** elements spawned by the agent-tracking camera carry the tracked agent's id,
    *  so "stop & clear" can remove the orbit (satellite widgets + their arrows) */
   trackOf?: string
+  /** the layer this element sits on (lib/layers.ts). Missing = the base layer,
+   *  so files from before layers existed load unchanged. */
+  layer?: string
 }
 
 export type DrawElement = Base & {
@@ -176,6 +180,8 @@ export type WidgetElement = Base & {
   title: string
   // kind-specific payload
   url?: string // web preview
+  /** web: a real browser on the canvas too, not the preview (WebBody) */
+  live?: boolean
   note?: string // markdown note
   cwd?: string // terminal working dir hint
   path?: string // file/folder a files/editor/doc/log widget points at
@@ -199,6 +205,31 @@ export type WidgetElement = Base & {
   query?: string // last SQL text, so reopening the canvas restores it
   /** transcript widget: the agent widget whose conversation it mirrors */
   agentId?: string
+  /** transcript widget: set to 'desktop' for a read-only mirror of a Claude
+   *  desktop-app session. It binds directly to `cwd` + `sessionId` (the Claude
+   *  Code session id) instead of an agent widget, and never spawns claude. */
+  mirrorOf?: 'desktop'
+  /** desktop mirror: the desktop app's own session id (`local_<uuid>`) */
+  desktopId?: string
+  /** terminal widget: shell command typed once when the shell first opens,
+   *  then cleared (used by "Fork into terminal"). */
+  startCmd?: string
+  // ---- stacks ----
+  // Widgets sharing a stackId occupy one spot on the canvas: every member keeps
+  // the same box, only the front one shows, and the rest stay mounted (live)
+  // behind it. The stack has no element of its own; see lib/stacks.ts.
+  /** the stack this widget belongs to */
+  stackId?: string
+  /** tab order within the stack (ascending) */
+  stackOrder?: number
+  /** the visible member; exactly one per stack (normalizeStacks enforces it) */
+  stackFront?: boolean
+  /** the stack's name, kept identical on every member */
+  stackTitle?: string
+  /** the widget's own size before it joined, restored when it leaves */
+  stackRestore?: { w: number; h: number }
+  /** collapsed to its title bar (its session keeps running); w/h are kept */
+  minimized?: boolean
 }
 
 export type CanvasElement =
@@ -211,6 +242,20 @@ export type CanvasElement =
   | WidgetElement
 
 export type Camera = { x: number; y: number; zoom: number }
+
+/**
+ * One plane in a tab's stack of layers. A layer can be its own project: with a
+ * `dir`, new widgets on it open in that folder instead of the tab's. `camera`
+ * remembers where you were looking the last time you left the layer.
+ */
+export type Layer = {
+  id: string
+  name: string
+  /** absolute folder for this layer's widgets; missing = the tab's folder */
+  dir?: string
+  /** the view to restore when switching back to this layer */
+  camera?: Camera
+}
 
 export type Workspace = {
   id: string
@@ -225,6 +270,11 @@ export type Workspace = {
   dirty?: boolean
   /** pinned tabs sit first in the tab strip and can't be closed until unpinned */
   pinned?: boolean
+  /** the tab's stack of layers, bottom first. Materialised only once a second
+   *  layer exists; missing = one implicit base layer. */
+  layers?: Layer[]
+  /** the layer being shown and edited; `camera` above is its view */
+  activeLayerId?: string
 }
 
 /** On-disk shape of a .ccnvs file */
@@ -234,6 +284,10 @@ export type CcnvsFile = {
   name: string
   camera: Camera
   elements: CanvasElement[]
+  /** written only when the canvas has two or more layers (still version 1:
+   *  older builds ignore it and show every element on one plane) */
+  layers?: Layer[]
+  activeLayer?: string
 }
 
 /** A reusable layout of widgets spawned together onto a fresh canvas. */
@@ -288,6 +342,7 @@ export const WIDGET_ACCENT: Record<WidgetKind, string> = {
   video: '#e0708a',
   mediainfo: '#e0899b',
   claude: '#d98a5a',
+  nowplaying: '#7fb58a',
 }
 
 /** Agent accent colours, each mapped to a valid Claude Code `/color` name. */

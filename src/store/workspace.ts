@@ -41,6 +41,29 @@ import { resetFlowState } from '../lib/flow'
 import { startTracking, stopTracking } from '../lib/tracker'
 import { killPty } from '../lib/terminal'
 import { useSettings } from '../lib/settings'
+import { addPane, equalSizes, MAX_PANES, removePane } from '../lib/focusPanes'
+import {
+  BASE_LAYER_ID,
+  MAX_LAYERS,
+  activeLayerElements,
+  activeLayerId,
+  findLayer,
+  hasLayers,
+  landingCamera,
+  layerDir,
+  layerOf,
+  layersOf,
+  newLayerId,
+  normalizeLayers,
+} from '../lib/layers'
+import { markOpenRequest } from '../lib/layersPerf'
+import {
+  normalizeStacks,
+  stacksOf,
+  stackOfId,
+  stripStack,
+  withStackSiblings,
+} from '../lib/stacks'
 
 let zCounter = 1
 const nextZ = () => zCounter++
@@ -74,10 +97,15 @@ function makeWorkspace(name: string, dir?: string): Workspace {
 }
 
 // ---------- widget defaults ----------
-const WIDGET_SIZE: Record<WidgetKind, { w: number; h: number }> = {
-  terminal: { w: 520, h: 340 },
-  agent: { w: 540, h: 380 },
-  web: { w: 480, h: 360 },
+// New widgets only (saved ones keep their size). A terminal opens at about
+// 80 columns of its default 13 px font, what full-screen programs (Claude
+// Code among them) are laid out for; a Claude chat is the same size whether
+// it runs in a terminal (agent) or is mirrored from the desktop app
+// (transcript), so the two sit together on the canvas.
+export const WIDGET_SIZE: Record<WidgetKind, { w: number; h: number }> = {
+  terminal: { w: 660, h: 420 },
+  agent: { w: 660, h: 480 },
+  web: { w: 800, h: 560 },
   note: { w: 320, h: 240 },
   files: { w: 300, h: 420 },
   diff: { w: 680, h: 460 },
@@ -92,15 +120,16 @@ const WIDGET_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   sql: { w: 760, h: 500 },
   data: { w: 680, h: 460 },
   plot: { w: 520, h: 440 },
-  transcript: { w: 460, h: 520 },
+  transcript: { w: 660, h: 480 },
   video: { w: 560, h: 380 },
   mediainfo: { w: 340, h: 440 },
   claude: { w: 1120, h: 720 },
+  nowplaying: { w: 420, h: 170 },
 }
 const WIDGET_TITLE: Record<WidgetKind, string> = {
   terminal: 'terminal',
   agent: 'claude agent',
-  web: 'web preview',
+  web: 'web',
   note: 'note',
   files: 'files',
   diff: 'git diff',
@@ -119,6 +148,7 @@ const WIDGET_TITLE: Record<WidgetKind, string> = {
   video: 'video',
   mediainfo: 'media info',
   claude: 'claude workspace',
+  nowplaying: 'Now playing',
 }
 
 /** Expand a set of ids to include every sibling sharing a groupId. */
@@ -135,6 +165,51 @@ export function withGroupSiblings(
   for (const el of elements)
     if (el.groupId && groups.has(el.groupId)) out.add(el.id)
   return [...out]
+}
+
+/** Size of the canvas area (kept here rather than importing lib/view, which
+ *  imports this store). */
+function canvasSize(): { vw: number; vh: number } {
+  const main = typeof document !== 'undefined' ? document.querySelector('.app__main') : null
+  if (main) return { vw: main.clientWidth, vh: main.clientHeight }
+  const w = typeof window !== 'undefined' ? window.innerWidth : 1280
+  const h = typeof window !== 'undefined' ? window.innerHeight - 38 : 720
+  return { vw: w, vh: h }
+}
+
+/** Drop keyboard focus (no-op without a DOM, e.g. in tests). */
+function blurFocus() {
+  if (typeof document === 'undefined') return
+  ;(document.activeElement as HTMLElement | null)?.blur?.()
+}
+/** The widget holding keyboard focus, if any. */
+function focusedWidgetId(): string | null {
+  if (typeof document === 'undefined') return null
+  return (
+    (document.activeElement as HTMLElement | null)?.closest?.('[data-widget-id]')?.getAttribute('data-widget-id') ??
+    null
+  )
+}
+
+/**
+ * After an undo or redo moved widgets between layers: nothing that isn't on
+ * the layer being shown may stay the active widget or keep keyboard focus
+ * (the focus-leak rule, for history). Defined below the store.
+ */
+let dropHiddenFocus = () => {}
+
+/** Put a new element on the active layer unless it names one. Base-layer
+ *  elements carry no `layer` field, so a single-layer canvas saves as before. */
+function stampLayer(ws: Workspace, el: CanvasElement): CanvasElement {
+  if (el.layer === BASE_LAYER_ID) {
+    // an explicit base layer (e.g. a tracked agent's satellite) is stored as none
+    const copy = { ...el } as CanvasElement
+    delete copy.layer
+    return copy
+  }
+  if (el.layer !== undefined || !hasLayers(ws)) return el
+  const id = activeLayerId(ws)
+  return id === BASE_LAYER_ID ? el : ({ ...el, layer: id } as CanvasElement)
 }
 
 /** Ask the backend (or the user) for an absolute folder path. */
@@ -204,8 +279,50 @@ export type AgentWizardCtx = {
   agentPrompt?: string
 }
 
+/** The stack spread view: a stack's members laid out over the dimmed canvas. */
+export type SpreadState = {
+  stackId: string
+  /** highlighted card (index into the stack's members) */
+  hi: number
+  /** true while the cards fly back into the stack before the view closes */
+  closing: boolean
+  /** a card being dragged: the slot it would take, or null while it is being
+   *  pulled out of the stack. Only a preview; the order changes on release. */
+  drag?: { id: string; to: number | null }
+}
+
+/** Focus mode: one widget fills the canvas area at 100% while the board dims,
+ *  or several side by side (panes, lib/focusPanes.ts). */
+export type FocusState = {
+  /** the pane you're working in (the only one, unless split); null while the
+   *  last ones fly home */
+  id: string | null
+  /** every widget in focus, left to right (empty while flying home) */
+  panes: string[]
+  /** each pane's share of the width (sums to 1) */
+  sizes: number[]
+  /** widgets flying back to their spot on the canvas */
+  returning: string[]
+  /** the box the focused widget fills, in canvas-local screen px */
+  box: { x: number; y: number; w: number; h: number }
+  /** the last change swapped stack tabs in place (no flight) */
+  instant?: boolean
+}
+
+/** Snap-to-stack feedback while a widget (or stack) is dragged over another. */
+export type StackDrop = {
+  /** widgets being dragged, the visible one first (a dragged stack brings every member) */
+  sourceIds: string[]
+  /** the widget it would stack onto (the front, if that is a stack) */
+  targetId: string
+  /** near: brackets close in as a heads-up; snap: releasing now stacks */
+  phase: 'near' | 'snap'
+  /** how close a 'near' drag is to snapping, 0..1 */
+  progress: number
+}
+
 /** Side panels that share the right-hand dock (only one open at a time). */
-export type SidePanel = 'roster' | 'prompts' | 'checkpoints' | 'memory' | 'settings'
+export type SidePanel = 'roster' | 'desktop' | 'prompts' | 'checkpoints' | 'memory' | 'settings'
 
 export type Store = {
   tabs: Workspace[]
@@ -246,6 +363,17 @@ export type Store = {
   presenting: boolean
   /** master switch for arrow orchestration (flow edges between agents) */
   flowsEnabled: boolean
+  /** the layers overview (the tilted stack). 'entering': it's animating in
+   *  over the live canvas (covered by its opaque backdrop); 'open': settled,
+   *  and the live canvas is hidden (still mounted); 'closing': the live
+   *  canvas shows again under the overview's last fade. Not saved. */
+  layerOverview: false | 'entering' | 'open' | 'closing'
+  /** the open stack spread view, if any */
+  spread: SpreadState | null
+  /** focus mode (session-only, never saved or undone) */
+  focus: FocusState | null
+  /** drag-to-stack drop target while dragging */
+  stackDrop: StackDrop | null
 
   // ----- derived -----
   active: () => Workspace | null
@@ -303,7 +431,9 @@ export type Store = {
   /** select these ids plus their group siblings (for user clicks) */
   selectWithGroups: (ids: string[]) => void
   clearSelection: () => void
-  deleteSelection: () => void
+  /** delete the selection; `keepWidgets` leaves its widgets (the ⌫ key: a
+   *  chat or panel only closes on purpose, from its own button or the menu) */
+  deleteSelection: (opts?: { keepWidgets?: boolean }) => void
   moveSelection: (dx: number, dy: number) => void
   beginFrameDrag: () => void
   endFrameDrag: () => void
@@ -366,17 +496,118 @@ export type Store = {
   // ----- flows -----
   setFlowsEnabled: (on: boolean) => void
 
+  // ----- layers -----
+  setLayerOverview: (open: boolean | 'open' | 'closing') => void
+  /** add a layer on top of the stack (the first call also materialises the
+   *  base layer); returns its id, or null at the nine-layer cap */
+  addLayer: (opts?: { name?: string; dir?: string; activate?: boolean }) => string | null
+  /** "New layer…": pick its folder (cancel = a plain layer in the tab's
+   *  folder), name it after the folder, add it on top */
+  newLayerWithPicker: (opts?: { activate?: boolean }) => Promise<string | null>
+  renameLayer: (id: string, name: string) => void
+  setLayerDir: (id: string, dir: string | undefined) => void
+  /** pick a folder for a layer (the folder chip and "Set folder…") */
+  pickLayerDir: (id: string) => Promise<void>
+  /** Show another layer. Always drops keyboard focus, the selection, the
+   *  active widget and any text edit, so typing can never reach a terminal
+   *  that's no longer visible. Saves the current view into the layer being
+   *  left and restores the target layer's (or `cam`). */
+  setActiveLayer: (id: string, cam?: Camera) => void
+  /** move elements to another layer, keeping x/y. Carries group siblings,
+   *  label boxes and arrows whose two ends both move. Undoable. */
+  moveToLayer: (ids: string[], layerId: string) => void
+  /** move a layer to `toIndex` in the stack (0 = bottom) */
+  moveLayer: (id: string, toIndex: number) => void
+  /** remove a layer, merging its widgets into the layer below it (above, for
+   *  the bottom one). Never closes anything. The base layer stays. Returns
+   *  the id of the layer the widgets went to. */
+  removeLayer: (id: string) => string | null
+  // ----- stacks -----
+  /** apply fn to a copy of each listed element in one update */
+  mutateElements: (ids: string[], fn: (el: CanvasElement) => void) => void
+  /** stack `ids` (and the stacks they belong to) onto `targetId`'s spot.
+   *  `front` picks the visible member (default: the first of ids). Callers
+   *  take the history snapshot. Returns the stack id. */
+  stackWidgets: (ids: string[], targetId: string, front?: string) => string | null
+  /** stack the current selection onto its first widget */
+  stackSelection: () => void
+  /** show this member in front of its stack */
+  setStackFront: (id: string) => void
+  /** bring the next/previous member of this widget's stack to the front */
+  cycleStack: (id: string, dir: 1 | -1) => void
+  /** take one widget out of its stack, at `at` (world, top-left) or beside it */
+  unstackWidget: (id: string, at?: { x: number; y: number }) => void
+  /** dissolve a stack, laying its members out in a row */
+  unstackAll: (stackId: string) => void
+  reorderStack: (stackId: string, ids: string[]) => void
+  renameStack: (stackId: string, title: string) => void
+  openSpread: (stackId: string) => void
+  /** fill the view with this widget (the front of its stack); `box` is the
+   *  canvas-local screen box to fill (lib/view.ts focusBox) */
+  enterFocus: (id: string, box: FocusState['box']) => void
+  /** fly the focused widget home */
+  exitFocus: () => void
+  /** while focused: work in this pane, or fly the current one home and put
+   *  this one in its place */
+  swapFocus: (id: string) => void
+  /** while focused: add a widget as a pane beside the current one */
+  splitFocus: (id: string) => void
+  /** while split: fly one pane home (the last one leaves focus) */
+  closePane: (id: string) => void
+  /** while split: the panes' widths after a divider drag */
+  setPaneSizes: (sizes: number[]) => void
+  /** collapse a widget (or its whole stack) to its title bar, or restore it */
+  toggleMinimized: (id: string) => void
+  /** a widget finished flying home */
+  finishFocusReturn: (id: string) => void
+  /** drop focus at once, no flight (tab or layer switch, widget removed) */
+  clearFocus: () => void
+  /** the window resized while focused */
+  setFocusBox: (box: FocusState['box']) => void
+  /** close the spread, optionally bringing `focusId` to the front and into focus */
+  closeSpread: (focusId?: string | null) => void
+  setSpreadHi: (i: number) => void
+  setSpreadDrag: (d: SpreadState['drag'] | null) => void
+  setStackDrop: (d: StackDrop | null) => void
+
   // ----- history -----
   beginHistory: () => void
   undo: () => void
   redo: () => void
 }
 
+/** If `id` is a stacked widget hidden behind another, bring it to the front. */
+function frontIfHidden(get: () => Store, _set: unknown, id: string) {
+  const ws = get().active()
+  if (!ws) return
+  const el = ws.elements.find((e) => e.id === id)
+  if (!el || el.type !== 'widget' || !el.stackId || el.stackFront) return
+  const st = stackOfId(ws.elements, id)
+  if (st && st.front.id !== id) get().setStackFront(id)
+}
+
+/** Set by view.ts: focuses a widget once the spread has closed (avoids an
+ *  import cycle between the store and the view helpers). */
+let spreadFocus: ((id: string) => void) | null = null
+export function setSpreadFocusHandler(fn: (id: string) => void) {
+  spreadFocus = fn
+}
+
 function patchActive(
   state: Store,
   fn: (ws: Workspace) => Workspace,
 ): Partial<Store> {
-  const tabs = state.tabs.map((t) => (t.id === state.activeTabId ? fn(t) : t))
+  const tabs = state.tabs.map((t) => {
+    if (t.id !== state.activeTabId) return t
+    const next = fn(t)
+    // whatever moved or resized a stack member (align, tidy, arrange…), every
+    // member follows the front's box; returns the same array when in sync
+    if (next.elements !== t.elements) {
+      const fixed = normalizeStacks(next.elements)
+      if (fixed !== next.elements) return { ...next, elements: fixed }
+    }
+    return next
+  })
   return { tabs }
 }
 
@@ -404,6 +635,10 @@ export const useStore = create<Store>((set, get) => ({
   snapGuides: null,
   presenting: false,
   flowsEnabled: false, // connector flows were removed from the UI
+  layerOverview: false,
+  spread: null,
+  focus: null,
+  stackDrop: null,
 
   active: () => {
     const s = get()
@@ -484,6 +719,9 @@ export const useStore = create<Store>((set, get) => ({
   setActiveDir: async () => {
     const ws = get().active()
     if (!ws) return
+    // a layer with its own folder: the chip shows and sets that folder
+    const layer = hasLayers(ws) ? findLayer(ws, activeLayerId(ws)) : undefined
+    if (layer?.dir) return get().pickLayerDir(layer.id)
     const dir = await chooseDir(ws.dir)
     if (dir === null) return // cancelled
     const realDir = dir || undefined
@@ -567,6 +805,7 @@ export const useStore = create<Store>((set, get) => ({
 
   switchTab: (id) =>
     set({
+      focus: null,
       activeTabId: id,
       selection: [],
       activeWidgetId: null,
@@ -678,12 +917,16 @@ export const useStore = create<Store>((set, get) => ({
   setStrokeWidth: (w) => set({ strokeWidth: w }),
 
   // ---------- camera ----------
-  setCamera: (c) => set((s) => patchActive(s, (ws) => ({ ...ws, camera: c }))),
+  setCamera: (c) => {
+    // focus pins a widget to the screen against the camera: hold it still
+    if (get().focus) return
+    set((s) => patchActive(s, (ws) => ({ ...ws, camera: c })))
+  },
 
   homeView: (vw, vh) => {
     const ws = get().active()
     if (!ws) return
-    const b = boundsOfMany(ws.elements)
+    const b = boundsOfMany(activeLayerElements(ws))
     let cam: Camera
     if (!b) {
       // empty canvas → put the world origin at the viewport centre
@@ -708,7 +951,7 @@ export const useStore = create<Store>((set, get) => ({
     set((s) =>
       patchActive(s, (ws) => ({
         ...ws,
-        elements: [...ws.elements, { ...el, z: nextZ() } as CanvasElement],
+        elements: [...ws.elements, stampLayer(ws, { ...el, z: nextZ() } as CanvasElement)],
         dirty: true,
       })),
     ),
@@ -719,7 +962,7 @@ export const useStore = create<Store>((set, get) => ({
         ...ws,
         elements: [
           ...ws.elements,
-          ...els.map((el) => ({ ...el, z: nextZ() }) as CanvasElement),
+          ...els.map((el) => stampLayer(ws, { ...el, z: nextZ() } as CanvasElement)),
         ],
         dirty: true,
       })),
@@ -752,6 +995,22 @@ export const useStore = create<Store>((set, get) => ({
 
   removeElements: (ids) => {
     const set_ = new Set(ids)
+    const f = get().focus
+    if (f && (f.panes.some((p) => set_.has(p)) || f.returning.some((r) => set_.has(r)))) {
+      // a removed pane just goes; the rest stay in focus
+      let rest = { panes: f.panes, sizes: f.sizes }
+      for (const p of f.panes) if (set_.has(p)) rest = removePane(rest.panes, rest.sizes, p)
+      set({
+        focus: rest.panes.length
+          ? {
+              ...f,
+              ...rest,
+              id: f.id && rest.panes.includes(f.id) ? f.id : rest.panes[0],
+              returning: f.returning.filter((r) => !set_.has(r)),
+            }
+          : null,
+      })
+    }
     // tracking ends if the tracked agent itself is being removed
     const trackId = get().trackingAgentId
     if (trackId && set_.has(trackId)) get().stopTrackingAgent(false)
@@ -774,7 +1033,8 @@ export const useStore = create<Store>((set, get) => ({
     set((s) =>
       patchActive(s, (w) => ({
         ...w,
-        elements: w.elements.filter((e) => !set_.has(e.id)),
+        // a stack that lost members picks a new front, or dissolves at one
+        elements: normalizeStacks(w.elements.filter((e) => !set_.has(e.id))),
         dirty: true,
       })),
     )
@@ -785,7 +1045,10 @@ export const useStore = create<Store>((set, get) => ({
     const w = init?.w ?? WIDGET_SIZE[kind].w
     const h = init?.h ?? WIDGET_SIZE[kind].h
     const id = newId()
-    const dir = get().active()?.dir
+    const ws = get().active()
+    // new widgets open in their layer's folder, falling back to the tab's
+    const onLayerId = init?.layer ?? (ws ? activeLayerId(ws) : BASE_LAYER_ID)
+    const dir = ws ? layerDir(ws, onLayerId) : undefined
     const el: CanvasElement = {
       id,
       type: 'widget',
@@ -814,7 +1077,9 @@ export const useStore = create<Store>((set, get) => ({
     get().beginHistory()
     get().addElement(el)
     // auto-focus the new widget so notes/terminals are usable immediately
-    set({ selection: [id], tool: 'select', activeWidgetId: id })
+    // (unless it was placed on a layer you can't see, e.g. a sorted mirror)
+    if (!ws || onLayerId === activeLayerId(ws))
+      set({ selection: [id], tool: 'select', activeWidgetId: id })
     return id
   },
 
@@ -893,7 +1158,12 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ---------- selection ----------
-  setSelection: (ids) => set({ selection: ids }),
+  setSelection: (ids) => {
+    // picking one stacked widget (a tab click, the roster, search, ⌘1–9…)
+    // brings it to the front of its stack
+    if (ids.length === 1) frontIfHidden(get, set, ids[0])
+    set({ selection: ids })
+  },
   selectWithGroups: (ids) => {
     const ws = get().active()
     set({ selection: ws ? withGroupSiblings(ws.elements, ids) : ids })
@@ -901,23 +1171,27 @@ export const useStore = create<Store>((set, get) => ({
   clearSelection: () =>
     set({ selection: [], activeWidgetId: null, editingTextId: null }),
 
-  deleteSelection: () => {
+  deleteSelection: (opts) => {
     const ws = get().active()
     if (!ws) return
-    const locked = new Set(
-      ws.elements.filter((e) => e.locked).map((e) => e.id),
+    const keep = new Set(
+      ws.elements.filter((e) => e.locked || (opts?.keepWidgets && e.type === 'widget')).map((e) => e.id),
     )
-    const ids = get().selection.filter((id) => !locked.has(id))
+    const ids = get().selection.filter((id) => !keep.has(id))
     if (!ids.length) return
     get().beginHistory()
     get().removeElements(ids)
-    set({ selection: [], activeWidgetId: null })
+    // what was kept stays selected
+    set({ selection: get().selection.filter((id) => keep.has(id)), activeWidgetId: null })
   },
 
   moveSelection: (dx, dy) => {
-    const base = new Set(get().selection)
+    let base = new Set(get().selection)
     if (frameDragChildren) for (const id of frameDragChildren) base.add(id)
     if (!base.size) return
+    // a stack moves as one
+    const ws0 = get().active()
+    if (ws0) base = withStackSiblings(ws0.elements, base)
     set((s) =>
       patchActive(s, (ws) => ({
         ...ws,
@@ -999,7 +1273,22 @@ export const useStore = create<Store>((set, get) => ({
     )
   },
 
-  setActiveWidget: (id) => set({ activeWidgetId: id }),
+  // A widget on another layer of this tab is brought into view first, so a
+  // jump (roster, search, attention) never focuses something you can't see;
+  // a widget stacked behind another is brought to the front of its stack.
+  setActiveWidget: (id) => {
+    const ws = get().active()
+    if (id && ws && hasLayers(ws)) {
+      const el = ws.elements.find((e) => e.id === id)
+      if (el && layerOf(el) !== activeLayerId(ws)) get().setActiveLayer(layerOf(el))
+    }
+    if (id) frontIfHidden(get, set, id)
+    // while focused, a jump to another widget (roster, search, attention bar,
+    // ⌘1–9) swaps which one is focused instead of leaving focus
+    const f = get().focus
+    if (f?.id && id && id !== f.id) get().swapFocus(id)
+    set({ activeWidgetId: id })
+  },
   setEditingText: (id) => set({ editingTextId: id }),
   setLabelingWidget: (id) => set({ labelingWidgetId: id }),
   setLabelFilter: (f) => set({ labelFilter: f && f.length ? f : null }),
@@ -1008,13 +1297,16 @@ export const useStore = create<Store>((set, get) => ({
   copySelection: () => {
     const ws = get().active()
     if (!ws) return
-    const sel = new Set(get().selection)
+    // a stack is copied whole
+    const sel = withStackSiblings(ws.elements, get().selection)
     clipboard = ws.elements.filter((e) => sel.has(e.id)).map((e) => ({ ...e }))
   },
 
+  // like ⌫, a cut never closes a widget (its session would end): widgets
+  // are copied, everything else is cut
   cutSelection: () => {
     get().copySelection()
-    get().deleteSelection()
+    get().deleteSelection({ keepWidgets: true })
   },
 
   pasteClipboard: (x, y) => {
@@ -1030,13 +1322,18 @@ export const useStore = create<Store>((set, get) => ({
     // remap ids + group ids so copies are independent
     const idMap = new Map<string, string>()
     const groupMap = new Map<string, string>()
-    const copies = clipboard.map((e) => {
+    const stackMap = new Map<string, string>()
+    let copies = clipboard.map((e) => {
       const ne = translated({ ...e }, dx, dy)
       ne.id = newId()
       idMap.set(e.id, ne.id)
       if (e.groupId) {
         if (!groupMap.has(e.groupId)) groupMap.set(e.groupId, newId())
         ne.groupId = groupMap.get(e.groupId)
+      }
+      if (ne.type === 'widget' && ne.stackId) {
+        if (!stackMap.has(ne.stackId)) stackMap.set(ne.stackId, newId())
+        ne.stackId = stackMap.get(ne.stackId)
       }
       // fresh agent sessions for pasted agents
       if (ne.type === 'widget' && ne.kind === 'agent') {
@@ -1052,6 +1349,8 @@ export const useStore = create<Store>((set, get) => ({
         if (c.to && idMap.has(c.to.id)) c.to = { id: idMap.get(c.to.id)! }
       }
     }
+    // a partial copy of a stack becomes a smaller stack, or plain widgets
+    copies = normalizeStacks(copies)
     get().beginHistory()
     get().addElements(copies)
     set({ selection: copies.map((c) => c.id) })
@@ -1246,7 +1545,8 @@ export const useStore = create<Store>((set, get) => ({
     if (!ws) return
     const isTerm = (e: CanvasElement): e is WidgetElement =>
       e.type === 'widget' && (e.kind === 'terminal' || e.kind === 'agent') && !e.locked
-    const all = ws.elements.filter(isTerm)
+    const stacks = stacksOf(ws.elements)
+    const all = ws.elements.filter(isTerm).filter((e) => !e.stackId || !stacks.has(e.stackId) || stacks.get(e.stackId)!.front.id === e.id)
     const picked = all.filter((e) => get().selection.includes(e.id))
     const terms = picked.length >= 2 ? picked : all
     if (!terms.length) return
@@ -1347,7 +1647,8 @@ export const useStore = create<Store>((set, get) => ({
   applyTemplate: (id, x, y) => {
     const tpl = get().templates.find((t) => t.id === id)
     if (!tpl || !tpl.widgets.length) return
-    const dir = get().active()?.dir
+    const tplWs = get().active()
+    const dir = tplWs ? layerDir(tplWs) : undefined
     const maxDx = Math.max(...tpl.widgets.map((w) => w.dx + w.w))
     const maxDy = Math.max(...tpl.widgets.map((w) => w.dy + w.h))
     const ox = x - maxDx / 2
@@ -1431,13 +1732,14 @@ export const useStore = create<Store>((set, get) => ({
   setSnapGuides: (g) => set({ snapGuides: g }),
 
   // ---------- view ----------
-  setPresenting: (on) => set({ presenting: on }),
+  setPresenting: (on) => set(on ? { presenting: on, focus: null } : { presenting: on }),
   zoomToSelection: (vw, vh) => {
     const ws = get().active()
     if (!ws) return
     const ids = new Set(get().selection)
-    const sel = ws.elements.filter((e) => ids.has(e.id))
-    const b = boundsOfMany(sel.length ? sel : ws.elements)
+    const els = activeLayerElements(ws)
+    const sel = els.filter((e) => ids.has(e.id))
+    const b = boundsOfMany(sel.length ? sel : els)
     if (!b) return
     const pad = 80
     const zoom = clamp(Math.min(vw / (b.w + pad * 2), vh / (b.h + pad * 2)), 0.1, 2)
@@ -1450,6 +1752,623 @@ export const useStore = create<Store>((set, get) => ({
   setFlowsEnabled: (on) => {
     if (!on) resetFlowState() // drop pending satisfied/turn bookkeeping
     set({ flowsEnabled: on })
+  },
+
+  // ---------- layers ----------
+  setLayerOverview: (open) => {
+    if (open === true) {
+      if (get().layerOverview) return
+      markOpenRequest()
+      // nothing typed while the stack is up may reach a widget
+      blurFocus()
+      set({ layerOverview: 'entering', activeWidgetId: null, editingTextId: null, spread: null, stackDrop: null, focus: null })
+    } else set({ layerOverview: open })
+  },
+
+  addLayer: (opts = {}) => {
+    const ws = get().active()
+    if (!ws) return null
+    const cur = layersOf(ws)
+    if (cur.length >= MAX_LAYERS) return null
+    const id = newLayerId(ws)
+    const name = (opts.name?.trim() || `layer ${cur.length + 1}`).slice(0, 40)
+    const layer = { id, name, ...(opts.dir ? { dir: opts.dir } : {}) }
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        // first use materialises the implicit base layer under the new one
+        layers: [...layersOf(w).map((l) => ({ ...l })), layer],
+        activeLayerId: activeLayerId(w),
+        dirty: true,
+      })),
+    )
+    if (opts.activate) get().setActiveLayer(id)
+    return id
+  },
+
+  newLayerWithPicker: async (opts = {}) => {
+    const ws = get().active()
+    if (!ws || layersOf(ws).length >= MAX_LAYERS) return null
+    const dir = await chooseDir(ws.dir)
+    const realDir = dir || undefined
+    return get().addLayer({
+      dir: realDir,
+      name: realDir ? baseName(realDir) : undefined,
+      activate: opts.activate,
+    })
+  },
+
+  renameLayer: (id, name) => {
+    const n = name.trim().slice(0, 40)
+    if (!n) return
+    set((s) =>
+      patchActive(s, (w) =>
+        hasLayers(w)
+          ? { ...w, dirty: true, layers: w.layers!.map((l) => (l.id === id ? { ...l, name: n } : l)) }
+          : w,
+      ),
+    )
+  },
+
+  setLayerDir: (id, dir) =>
+    set((s) =>
+      patchActive(s, (w) => {
+        if (!hasLayers(w)) return w
+        return {
+          ...w,
+          dirty: true,
+          layers: w.layers!.map((l) => {
+            if (l.id !== id) return l
+            const next = { ...l }
+            if (dir) next.dir = dir
+            else delete next.dir
+            // a layer still called "layer N" takes its new folder's name
+            if (dir && /^layer \d+$/.test(l.name)) next.name = baseName(dir)
+            return next
+          }),
+        }
+      }),
+    ),
+
+  pickLayerDir: async (id) => {
+    const ws = get().active()
+    if (!ws) return
+    const dir = await chooseDir(findLayer(ws, id)?.dir ?? ws.dir)
+    if (dir === null) return // cancelled
+    get().setLayerDir(id, dir || undefined)
+  },
+
+  setActiveLayer: (id, cam) => {
+    const ws = get().active()
+    if (!ws) return
+    if (get().focus) set({ focus: null })
+    // the focus-leak rule: whatever happens next, nothing keeps keyboard focus
+    blurFocus()
+    // a stack spread or a pending drag-to-stack belongs to the layer being left
+    set({
+      selection: [],
+      activeWidgetId: null,
+      editingTextId: null,
+      labelingWidgetId: null,
+      spread: null,
+      stackDrop: null,
+    })
+    if (!hasLayers(ws) || !findLayer(ws, id)) return
+    const cur = activeLayerId(ws)
+    if (cur === id && !cam) return
+    const { vw, vh } = canvasSize()
+    // remember where we were on the layer we're leaving
+    const left = {
+      ...ws,
+      layers: ws.layers!.map((l) => (l.id === cur ? { ...l, camera: ws.camera } : l)),
+    }
+    const next = cam ?? landingCamera(left, id, vw, vh)
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        layers: left.layers,
+        activeLayerId: id,
+        camera: next,
+      })),
+    )
+  },
+
+  moveToLayer: (ids, layerId) => {
+    const ws = get().active()
+    if (!ws || !findLayer(ws, layerId) || !ids.length) return
+    // a stack moves whole: its members share one spot, so they share a layer
+    const moving = withStackSiblings(ws.elements, withGroupSiblings(ws.elements, ids))
+    // label boxes travel with the widget they wrap
+    for (const e of ws.elements) if (e.labelFor && moving.has(e.labelFor)) moving.add(e.id)
+    // arrows go along when both of their ends do
+    for (const e of ws.elements)
+      if (e.type === 'arrow' && e.from && e.to && moving.has(e.from.id) && moving.has(e.to.id))
+        moving.add(e.id)
+    get().beginHistory()
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: w.elements.map((e) => {
+          if (!moving.has(e.id) || layerOf(e) === layerId) return e
+          const copy = { ...e } as CanvasElement
+          if (layerId === BASE_LAYER_ID) delete copy.layer
+          else copy.layer = layerId
+          return copy
+        }),
+      })),
+    )
+    // anything that just left the layer you're on can't stay selected or focused
+    if (layerId !== activeLayerId(ws)) {
+      const focused = focusedWidgetId()
+      if (focused && moving.has(focused)) blurFocus()
+      const st = get()
+      set({
+        selection: st.selection.filter((x) => !moving.has(x)),
+        activeWidgetId: st.activeWidgetId && moving.has(st.activeWidgetId) ? null : st.activeWidgetId,
+      })
+    }
+  },
+
+  moveLayer: (id, toIndex) =>
+    set((s) =>
+      patchActive(s, (w) => {
+        if (!hasLayers(w)) return w
+        const from = w.layers!.findIndex((l) => l.id === id)
+        const to = clamp(toIndex, 0, w.layers!.length - 1)
+        if (from < 0 || from === to) return w
+        const layers = w.layers!.slice()
+        const [l] = layers.splice(from, 1)
+        layers.splice(to, 0, l)
+        return { ...w, layers, dirty: true }
+      }),
+    ),
+
+  removeLayer: (id) => {
+    const ws = get().active()
+    if (!ws || !hasLayers(ws) || id === BASE_LAYER_ID) return null
+    const ls = ws.layers!
+    const i = ls.findIndex((l) => l.id === id)
+    if (i < 0) return null
+    const into = ls[i > 0 ? i - 1 : 1].id
+    // undoable: undo puts the widgets back on their own layer (normalizing
+    // re-creates its entry; the name and folder aren't in history)
+    get().beginHistory()
+    // leaving the layer you're on: go to where its widgets are going
+    if (activeLayerId(ws) === id) get().setActiveLayer(into)
+    set((s) =>
+      patchActive(s, (w) => {
+        const elements = w.elements.map((e) => {
+          if (layerOf(e) !== id) return e
+          const copy = { ...e } as CanvasElement
+          if (into === BASE_LAYER_ID) delete copy.layer
+          else copy.layer = into
+          return copy
+        })
+        // back to one layer: the tab saves exactly as a single-layer canvas
+        return normalizeLayers({
+          ...w,
+          elements,
+          layers: w.layers!.filter((l) => l.id !== id),
+          dirty: true,
+        })
+      }),
+    )
+    return into
+  },
+
+  // ---------- stacks ----------
+  mutateElements: (ids, fn) => {
+    const set_ = new Set(ids)
+    set((s) =>
+      patchActive(s, (ws) => ({
+        ...ws,
+        elements: ws.elements.map((e) => {
+          if (!set_.has(e.id)) return e
+          const copy = { ...e } as CanvasElement
+          fn(copy)
+          return copy
+        }),
+        dirty: true,
+      })),
+    )
+  },
+
+  stackWidgets: (ids, targetId, front) => {
+    const ws = get().active()
+    if (!ws) return null
+    const byId = new Map(ws.elements.map((e) => [e.id, e]))
+    const target = byId.get(targetId)
+    if (!target || target.type !== 'widget' || target.locked) return null
+    const stacks = stacksOf(ws.elements)
+    const targetStack = target.stackId ? stacks.get(target.stackId) : undefined
+    // incoming widgets: the given ids plus every member of a stack they're in,
+    // keeping each dragged stack's tab order
+    const incoming: WidgetElement[] = []
+    const seen = new Set<string>(targetStack ? targetStack.members.map((m) => m.id) : [targetId])
+    let incomingTitle: string | undefined
+    for (const id of ids) {
+      const el = byId.get(id)
+      if (!el || el.type !== 'widget' || el.locked || seen.has(id)) continue
+      const st = el.stackId ? stacks.get(el.stackId) : undefined
+      const group = st ? st.members : [el]
+      if (st && !incomingTitle) incomingTitle = st.title
+      for (const m of group)
+        if (!seen.has(m.id) && !m.locked) {
+          seen.add(m.id)
+          incoming.push(m)
+        }
+    }
+    if (!incoming.length) return null
+    const base: WidgetElement[] = targetStack ? targetStack.members : [target]
+    const all = [...base, ...incoming]
+    const sid = targetStack?.id ?? newId()
+    const title = targetStack?.title ?? incomingTitle ?? target.title
+    // the dragged widget (or the dragged stack's front) shows
+    const firstIn = byId.get(ids[0]) as WidgetElement | undefined
+    const draggedFront =
+      firstIn?.stackId && stacks.get(firstIn.stackId) ? stacks.get(firstIn.stackId)!.front.id : incoming[0].id
+    const frontId = front ?? draggedFront
+    const box = { x: target.x, y: target.y, w: target.w, h: target.h }
+    const update = new Map<string, WidgetElement>()
+    all.forEach((m, i) => {
+      update.set(m.id, {
+        ...m,
+        stackId: sid,
+        stackOrder: i,
+        stackFront: m.id === frontId || undefined,
+        stackTitle: title,
+        stackRestore: m.stackRestore ?? { w: m.w, h: m.h },
+        ...box,
+      })
+    })
+    const z = nextZ()
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: normalizeStacks(
+          w.elements.map((e) => {
+            const u = update.get(e.id)
+            return u ? { ...u, z } : e
+          }),
+        ),
+      })),
+    )
+    set({ selection: [frontId], activeWidgetId: null })
+    return sid
+  },
+
+  stackSelection: () => {
+    const ws = get().active()
+    if (!ws) return
+    const sel = get().selection
+    const widgets = sel
+      .map((id) => ws.elements.find((e) => e.id === id))
+      .filter((e): e is WidgetElement => !!e && e.type === 'widget' && !e.locked)
+    if (widgets.length < 2) return
+    const [target, ...rest] = widgets
+    get().beginHistory()
+    get().stackWidgets(
+      rest.map((w) => w.id),
+      target.id,
+      target.stackId ? (stackOfId(ws.elements, target.id)?.front.id ?? target.id) : target.id,
+    )
+  },
+
+  setStackFront: (id) => {
+    const ws = get().active()
+    if (!ws) return
+    const st = stackOfId(ws.elements, id)
+    if (!st || st.front.id === id) return
+    const ids = new Set(st.members.map((m) => m.id))
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: w.elements.map((e) =>
+          ids.has(e.id) && e.type === 'widget' ? { ...e, stackFront: e.id === id || undefined } : e,
+        ),
+      })),
+    )
+    // focused on this stack: the new front takes the focused spot in place
+    // (unless it's already a pane of its own, when the stack is split)
+    const f = get().focus
+    if (f?.id && f.id !== id && !f.panes.includes(id) && st.members.some((m) => m.id === f.id))
+      set({ focus: { ...f, id, panes: f.panes.map((p) => (p === f.id ? id : p)), instant: true } })
+  },
+
+  cycleStack: (id, dir) => {
+    const ws = get().active()
+    if (!ws) return
+    const st = stackOfId(ws.elements, id)
+    if (!st) return
+    const i = st.members.findIndex((m) => m.id === st.front.id)
+    const next = st.members[(i + dir + st.members.length) % st.members.length]
+    get().setStackFront(next.id)
+    const wasActive = get().activeWidgetId != null
+    set({ selection: [next.id], activeWidgetId: wasActive ? next.id : null })
+  },
+
+  unstackWidget: (id, at) => {
+    const ws = get().active()
+    if (!ws) return
+    const st = stackOfId(ws.elements, id)
+    if (!st) return
+    const el = st.members.find((m) => m.id === id)!
+    const size = el.stackRestore ?? { w: el.w, h: el.h }
+    const pos = at ?? { x: st.front.x + st.front.w + 40, y: st.front.y }
+    const wasFront = st.front.id === id
+    const i = st.members.findIndex((m) => m.id === id)
+    const nextFront = wasFront ? st.members[i > 0 ? i - 1 : 1].id : null
+    const z = nextZ()
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: normalizeStacks(
+          w.elements.map((e) => {
+            if (e.id === id && e.type === 'widget') return { ...stripStack(e), ...size, ...pos, z }
+            if (nextFront && e.id === nextFront && e.type === 'widget') return { ...e, stackFront: true }
+            return e
+          }),
+        ),
+      })),
+    )
+  },
+
+  unstackAll: (stackId) => {
+    const ws = get().active()
+    if (!ws) return
+    const st = stacksOf(ws.elements).get(stackId)
+    if (!st) return
+    const placed = new Map<string, { x: number; y: number; w: number; h: number }>()
+    let x = st.front.x
+    for (const m of st.members) {
+      const size = m.stackRestore ?? { w: m.w, h: m.h }
+      placed.set(m.id, { x, y: st.front.y, ...size })
+      x += size.w + 32
+    }
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: w.elements.map((e) => {
+          const p = placed.get(e.id)
+          return p && e.type === 'widget' ? { ...stripStack(e), ...p } : e
+        }),
+      })),
+    )
+    set({ selection: st.members.map((m) => m.id) })
+  },
+
+  reorderStack: (stackId, ids) => {
+    const order = new Map(ids.map((id, i) => [id, i]))
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: w.elements.map((e) =>
+          e.type === 'widget' && e.stackId === stackId && order.has(e.id)
+            ? { ...e, stackOrder: order.get(e.id) }
+            : e,
+        ),
+      })),
+    )
+  },
+
+  renameStack: (stackId, title) => {
+    const t = title.trim()
+    if (!t) return
+    get().beginHistory()
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: w.elements.map((e) =>
+          e.type === 'widget' && e.stackId === stackId ? { ...e, stackTitle: t } : e,
+        ),
+      })),
+    )
+  },
+
+  enterFocus: (id, box) => {
+    const st = get()
+    if (st.layerOverview || st.presenting) return
+    const ws = st.active()
+    const el = ws?.elements.find((e) => e.id === id)
+    if (!ws || !el || el.type !== 'widget') return
+    frontIfHidden(get, set, id)
+    // a stacked widget is focused as its stack's front
+    const front = (el.stackId && stackOfId(ws.elements, id)?.front.id) || id
+    if (el.minimized) get().toggleMinimized(front)
+    set({
+      focus: {
+        id: front,
+        panes: [front],
+        sizes: [1],
+        returning: (st.focus?.returning ?? []).filter((r) => r !== front),
+        box,
+        instant: false,
+      },
+      spread: null,
+      stackDrop: null,
+      selection: [front],
+    })
+  },
+
+  exitFocus: () => {
+    const f = get().focus
+    if (!f?.id) return
+    set({
+      focus: {
+        ...f,
+        id: null,
+        panes: [],
+        sizes: [],
+        returning: [...f.returning.filter((r) => !f.panes.includes(r)), ...f.panes],
+      },
+    })
+  },
+
+  swapFocus: (id) => {
+    const f = get().focus
+    if (!f?.id || f.id === id) return
+    const el = get().active()?.elements.find((e) => e.id === id)
+    if (!el || el.type !== 'widget') return
+    // already a pane: just work there
+    if (f.panes.includes(id)) {
+      set({ focus: { ...f, id, instant: false }, selection: [id] })
+      return
+    }
+    if (el.minimized) get().toggleMinimized(id)
+    set({
+      focus: {
+        ...f,
+        id,
+        panes: f.panes.map((p) => (p === f.id ? id : p)),
+        returning: [...f.returning.filter((r) => r !== f.id && r !== id), f.id],
+        instant: false,
+      },
+      selection: [id],
+    })
+  },
+
+  splitFocus: (id) => {
+    const f = get().focus
+    if (!f?.id || f.panes.includes(id) || f.panes.length >= MAX_PANES) return
+    const el = get().active()?.elements.find((e) => e.id === id)
+    if (!el || el.type !== 'widget') return
+    if (el.minimized) get().toggleMinimized(id)
+    const panes = addPane(f.panes, f.id, id)
+    set({
+      focus: {
+        ...f,
+        id,
+        panes,
+        sizes: equalSizes(panes.length),
+        returning: f.returning.filter((r) => r !== id),
+        instant: false,
+      },
+      selection: [id],
+    })
+  },
+
+  closePane: (id) => {
+    const f = get().focus
+    if (!f?.id || !f.panes.includes(id)) return
+    if (f.panes.length === 1) return get().exitFocus()
+    const rest = removePane(f.panes, f.sizes, id)
+    const at = f.panes.indexOf(id)
+    set({
+      focus: {
+        ...f,
+        ...rest,
+        id: f.id === id ? rest.panes[Math.max(0, at - 1)] : f.id,
+        returning: [...f.returning.filter((r) => r !== id), id],
+        instant: false,
+      },
+    })
+  },
+
+  setPaneSizes: (sizes) => {
+    const f = get().focus
+    if (f && sizes.length === f.panes.length) set({ focus: { ...f, sizes } })
+  },
+
+  toggleMinimized: (id) => {
+    const ws = get().active()
+    const el = ws?.elements.find((e) => e.id === id)
+    if (!ws || !el || el.type !== 'widget') return
+    // a stack collapses and opens as one
+    const ids = el.stackId
+      ? new Set(ws.elements.filter((e) => e.type === 'widget' && e.stackId === el.stackId).map((e) => e.id))
+      : new Set([id])
+    const on = !el.minimized
+    // a pane being collapsed leaves focus first
+    const f = get().focus
+    if (on && f) for (const p of f.panes) if (ids.has(p)) get().closePane(p)
+    get().beginHistory()
+    set((s) =>
+      patchActive(s, (w) => ({
+        ...w,
+        dirty: true,
+        elements: w.elements.map((e) =>
+          ids.has(e.id) && e.type === 'widget' ? { ...e, minimized: on || undefined } : e,
+        ),
+      })),
+    )
+    if (on && ids.has(get().activeWidgetId ?? '')) set({ activeWidgetId: null })
+  },
+
+  finishFocusReturn: (id) => {
+    const f = get().focus
+    if (!f) return
+    const returning = f.returning.filter((r) => r !== id)
+    set({ focus: !f.id && !returning.length ? null : { ...f, returning } })
+  },
+
+  clearFocus: () => {
+    if (get().focus) set({ focus: null })
+  },
+
+  setFocusBox: (box) => {
+    const f = get().focus
+    if (f) set({ focus: { ...f, box } })
+  },
+
+  openSpread: (stackId) => {
+    const ws = get().active()
+    if (!ws || get().focus) return
+    const st = stacksOf(ws.elements).get(stackId)
+    if (!st) return
+    set({
+      spread: { stackId, hi: st.members.findIndex((m) => m.id === st.front.id), closing: false },
+      activeWidgetId: null,
+      selection: [st.front.id],
+    })
+  },
+
+  closeSpread: (focusId) => {
+    const sp = get().spread
+    if (!sp || sp.closing) return
+    if (focusId) get().setStackFront(focusId)
+    set({ spread: { ...sp, closing: true, drag: undefined } })
+    const finish = () => {
+      if (get().spread?.stackId !== sp.stackId) return
+      set({ spread: null })
+      if (focusId) spreadFocus?.(focusId)
+    }
+    const reduce = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    setTimeout(finish, reduce ? 0 : 300)
+  },
+
+  setSpreadHi: (i) => {
+    const sp = get().spread
+    if (sp && sp.hi !== i) set({ spread: { ...sp, hi: i } })
+  },
+
+  setSpreadDrag: (d) => {
+    const sp = get().spread
+    if (!sp) return
+    const cur = sp.drag
+    if (cur === d || (!cur && !d) || (cur && d && cur.id === d.id && cur.to === d.to)) return
+    set({ spread: { ...sp, drag: d ?? undefined } })
+  },
+
+  setStackDrop: (d) => {
+    const cur = get().stackDrop
+    if (
+      cur === d ||
+      (cur &&
+        d &&
+        cur.targetId === d.targetId &&
+        cur.phase === d.phase &&
+        Math.abs(cur.progress - d.progress) < 0.04 &&
+        cur.sourceIds.join() === d.sourceIds.join())
+    )
+      return
+    set({ stackDrop: d })
   },
 
   // ---------- history ----------
@@ -1469,8 +2388,10 @@ export const useStore = create<Store>((set, get) => ({
     const prev = h.past.pop()
     if (!prev) return
     h.future.push(ws.elements.map((e) => ({ ...e })))
-    set((s) => patchActive(s, (w) => ({ ...w, elements: prev, dirty: true })))
+    // a snapshot may name a layer removed since: normalizing gives it an entry back
+    set((s) => patchActive(s, (w) => normalizeLayers({ ...w, elements: prev, dirty: true })))
     set({ selection: [] })
+    dropHiddenFocus()
   },
 
   redo: () => {
@@ -1480,8 +2401,9 @@ export const useStore = create<Store>((set, get) => ({
     const next = h.future.pop()
     if (!next) return
     h.past.push(ws.elements.map((e) => ({ ...e })))
-    set((s) => patchActive(s, (w) => ({ ...w, elements: next, dirty: true })))
+    set((s) => patchActive(s, (w) => normalizeLayers({ ...w, elements: next, dirty: true })))
     set({ selection: [] })
+    dropHiddenFocus()
   },
 }))
 
@@ -1490,6 +2412,19 @@ export const useStore = create<Store>((set, get) => ({
  * one tab exists, and closeTab refuses to drop the last one, so this always
  * resolves to a real workspace once the app has started.
  */
+dropHiddenFocus = () => {
+  const st = useStore.getState()
+  const ws = st.active()
+  if (!ws || !hasLayers(ws)) return
+  const here = activeLayerId(ws)
+  const hidden = (id: string | null) => {
+    const el = id ? ws.elements.find((e) => e.id === id) : undefined
+    return !!el && layerOf(el) !== here
+  }
+  if (hidden(focusedWidgetId())) blurFocus()
+  if (hidden(st.activeWidgetId)) useStore.setState({ activeWidgetId: null })
+}
+
 export const selectActive = (s: Store): Workspace =>
   s.tabs.find((t) => t.id === s.activeTabId) ?? s.tabs[0]
 
@@ -1501,7 +2436,7 @@ export function bootstrap() {
     for (const ws of session.tabs)
       for (const el of ws.elements) zCounter = Math.max(zCounter, el.z + 1)
     useStore.setState({
-      tabs: session.tabs,
+      tabs: session.tabs.map(normalizeLayers),
       activeTabId:
         session.activeTabId && session.tabs.some((t) => t.id === session.activeTabId)
           ? session.activeTabId

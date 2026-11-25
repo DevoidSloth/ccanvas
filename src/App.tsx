@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
-import { viewport, viewCenter, orderedTerminals, focusWidget, cycleTerminal, exitTerminal } from './lib/view'
+import { viewport, viewCenter, orderedTerminals, focusWidget, cycleTerminal, exitTerminal, toggleFocus, splitNext } from './lib/view'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { isTauri } from './lib/backend'
+import { desktopMirrorsSupported, isTauri } from './lib/backend'
 import { useStore, selectActive } from './store/workspace'
+import { stackOfId } from './lib/stacks'
 import { zoomAt, screenToWorld } from './lib/geometry'
 import { TopBar } from './ui/TopBar'
 import { TermNumbers } from './ui/TermNumbers'
@@ -18,6 +19,7 @@ import { AttentionBar } from './ui/AttentionBar'
 import { Presentation } from './ui/Presentation'
 import { ContextMenuHost, isEditableTarget } from './ui/ContextMenu'
 import { Roster } from './ui/Roster'
+import { DesktopSessions } from './ui/DesktopSessions'
 import { PromptLibrary } from './ui/PromptLibrary'
 import { Checkpoints } from './ui/Checkpoints'
 import { MemoryPanel } from './ui/MemoryPanel'
@@ -26,6 +28,8 @@ import { Minibuffer } from './ui/Minibuffer'
 import { TrackingBar } from './ui/TrackingBar'
 import { FollowController } from './ui/FollowController'
 import { useTerminalFileDrop } from './lib/fileDrop'
+import { LayerOverview } from './ui/LayerOverview'
+import { activeLayerElements, activeLayerId, layersOf } from './lib/layers'
 import { SettingsPanel } from './ui/SettingsPanel'
 import { UpdateBanner } from './ui/UpdateBanner'
 import { inEmacs } from './lib/terminal'
@@ -54,8 +58,9 @@ function worldCenter() {
 function closeCurrentWidget() {
   const store = useStore.getState()
   const ws = store.active()
+  // the active layer only: a widget you can't see is never the one ⌘W closes
   const widgetIds = new Set(
-    (ws?.elements ?? []).filter((e) => e.type === 'widget').map((e) => e.id),
+    (ws ? activeLayerElements(ws) : []).filter((e) => e.type === 'widget').map((e) => e.id),
   )
   const focused = (document.activeElement as HTMLElement | null)
     ?.closest?.('[data-widget-id]')
@@ -80,19 +85,54 @@ export default function App() {
   useTerminalFileDrop()
   const tool = useStore((s) => s.tool)
   const openPanel = useStore((s) => s.openPanel)
+  const layerOverview = useStore((s) => !!s.layerOverview)
 
   // Terminal navigation runs in the capture phase, ahead of xterm, so the keys
   // work while you're typing in a terminal and never reach the shell:
   //   ⌘1–9     jump to the Nth terminal (reading order) and click into it
   //   ⌘⇧] / ⌘⇧[  next / previous terminal
   //   ⌘Esc     click out of the current terminal
+  //   ⌃⌘↑      open the layers overview (from anywhere, even a terminal)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.metaKey && !e.altKey && !e.shiftKey && e.code === 'ArrowUp') {
+        e.preventDefault()
+        e.stopPropagation()
+        useStore.getState().setLayerOverview(true)
+        return
+      }
+      // ⌃⇥ / ⌃⇧⇥ step through the stack of the widget you're in (or have
+      // selected), in place. A terminal running emacs keeps the key.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab' && !inEmacs(e.target)) {
+        const st = useStore.getState()
+        const id = st.activeWidgetId ?? (st.selection.length === 1 ? st.selection[0] : null)
+        if (id && stackOfId(selectActive(st).elements, id)) {
+          e.preventDefault()
+          e.stopPropagation()
+          st.cycleStack(id, e.shiftKey ? -1 : 1)
+          return
+        }
+      }
       if (!(e.metaKey || (e.ctrlKey && !IS_MAC))) return
       if (e.altKey) return
+      // nothing jumps into a terminal while the layers overview is up
+      if (useStore.getState().layerOverview) return
       const stop = () => {
         e.preventDefault()
         e.stopPropagation()
+      }
+      // ⌘⇧↵ focus mode: the widget you're in (or the selected one) fills the
+      // view; again to go back. Works from inside a terminal (capture phase).
+      if (e.shiftKey && e.key === 'Enter') {
+        stop()
+        toggleFocus()
+        return
+      }
+      // ⌘\ in focus mode: put the next widget beside (a stack-mate first)
+      if (!e.shiftKey && e.key === '\\' && useStore.getState().focus?.id) {
+        stop()
+        splitNext()
+        return
       }
       if (!e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
         const t = orderedTerminals()[Number(e.code.slice(5)) - 1]
@@ -295,17 +335,81 @@ export default function App() {
         }
         if (key === 'a') {
           e.preventDefault()
-          store.setSelection(selectActive(store).elements.map((el) => el.id))
+          store.setSelection(activeLayerElements(selectActive(store)).map((el) => el.id))
           return
         }
       }
 
-      if (editing || mod) return
+      // the overview owns the bare keys while it's open
+      if (editing || mod || store.layerOverview) return
 
+      // layers: L opens the overview; ⌥↑ / ⌥↓ step up / down the stack and
+      // ⌥1–9 jumps to a layer (instant switch)
+      if ((e.key === 'l' || e.key === 'L') && !e.altKey && !e.ctrlKey) {
+        e.preventDefault()
+        store.setLayerOverview(true)
+        return
+      }
+      if (e.altKey && !e.ctrlKey && (e.code === 'ArrowUp' || e.code === 'ArrowDown' || /^Digit[1-9]$/.test(e.code))) {
+        const ws = selectActive(store)
+        const ls = layersOf(ws)
+        if (ls.length < 2) return
+        e.preventDefault()
+        const cur = ls.findIndex((l) => l.id === activeLayerId(ws))
+        // ⇧⌥↑ / ⇧⌥↓: send the selection one layer up / down (you stay here)
+        if (e.shiftKey && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+          const to = ls[cur + (e.code === 'ArrowUp' ? 1 : -1)]
+          if (to && store.selection.length) store.moveToLayer(store.selection, to.id)
+          return
+        }
+        const to =
+          e.code === 'ArrowUp' ? cur + 1 : e.code === 'ArrowDown' ? cur - 1 : Number(e.code.slice(5)) - 1
+        if (to >= 0 && to < ls.length && to !== cur) store.setActiveLayer(ls[to].id)
+        return
+      }
+
+      // focus mode: Esc goes back to the canvas (inside a terminal Esc is the
+      // program's, so ⌘Esc steps out of it first); F focuses the selection
+      if (e.key === 'Escape' && store.focus?.id) {
+        e.preventDefault()
+        store.exitFocus()
+        return
+      }
+      if (key === 'f' && !e.altKey && store.selection.length === 1 && !store.focus?.id) {
+        const el = selectActive(store).elements.find((x) => x.id === store.selection[0])
+        if (el?.type === 'widget') {
+          e.preventDefault()
+          toggleFocus(el.id)
+          return
+        }
+      }
+      // ⌫ deletes drawings, text, frames and images, never a widget: a chat
+      // or panel closes only on purpose (its ✕, or Delete in its menu)
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        store.deleteSelection()
+        store.deleteSelection({ keepWidgets: true })
         return
+      }
+      // stacks: S stacks the selection; with a stacked widget selected,
+      // [ / ] switch the front and U unstacks everything
+      if (key === 's' && !e.altKey && store.selection.length >= 2) {
+        e.preventDefault()
+        store.stackSelection()
+        return
+      }
+      if (store.selection.length === 1 && !e.altKey) {
+        const stk = stackOfId(selectActive(store).elements, store.selection[0])
+        if (stk && (e.key === '[' || e.key === ']')) {
+          e.preventDefault()
+          store.cycleStack(store.selection[0], e.key === ']' ? 1 : -1)
+          return
+        }
+        if (stk && key === 'u') {
+          e.preventDefault()
+          store.beginHistory()
+          store.unstackAll(stk.id)
+          return
+        }
       }
       if (e.key === 'Escape') {
         if (store.presenting) store.setPresenting(false)
@@ -415,7 +519,9 @@ export default function App() {
         <CanvasSearch />
         <AgentWizard />
         <Presentation />
+        {layerOverview && <LayerOverview />}
         {openPanel === 'roster' && <Roster />}
+        {openPanel === 'desktop' && desktopMirrorsSupported() && <DesktopSessions />}
         {openPanel === 'prompts' && <PromptLibrary />}
         {openPanel === 'checkpoints' && <Checkpoints />}
         {openPanel === 'memory' && <MemoryPanel />}

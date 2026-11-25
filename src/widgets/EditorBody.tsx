@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as Monaco from 'monaco-editor'
 import type { WidgetElement } from '../lib/types'
 import { useStore } from '../store/workspace'
+import { useSettings, textScale as scaleOf, useTextScale } from '../lib/settings'
 import { readFile, saveFile, resolvePath, baseName, listDir, type DirEntry } from '../lib/backend'
 import { IconReload, IconSave } from '../ui/icons'
 
@@ -140,8 +141,8 @@ export function EditorBody({ el, active }: { el: WidgetElement; active: boolean 
         automaticLayout: true, // re-layout when the widget is resized
         minimap: { enabled: false }, // kept lean — core editing surface only
         fontFamily: "'Spline Sans Mono', ui-monospace, 'SF Mono', Menlo, monospace",
-        fontSize: 12.5,
-        lineHeight: 19,
+        fontSize: 13 * scaleOf(useSettings.getState().textSize),
+        lineHeight: Math.round(20 * scaleOf(useSettings.getState().textSize)),
         fontLigatures: true,
         letterSpacing: 0.2,
         scrollBeyondLastLine: false,
@@ -186,6 +187,12 @@ export function EditorBody({ el, active }: { el: WidgetElement; active: boolean 
   useEffect(() => {
     if (active && ready) editorRef.current?.focus()
   }, [active, ready])
+
+  // follow the Settings text size
+  const ts = useTextScale()
+  useEffect(() => {
+    editorRef.current?.updateOptions({ fontSize: 13 * ts, lineHeight: Math.round(20 * ts) })
+  }, [ts, ready])
 
   if (!hasPath) {
     return (

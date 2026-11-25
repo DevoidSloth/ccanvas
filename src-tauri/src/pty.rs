@@ -153,6 +153,27 @@ fn spawn_session(
     if !cfg!(windows) {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // say which terminal this is. Started from another terminal (`npm run
+        // app` in Ghostty, iTerm2, kitty), ccanvas would otherwise pass that
+        // terminal's identity on, and programs would use protocols xterm.js
+        // doesn't speak (kitty graphics, iTerm2 extensions)
+        cmd.env("TERM_PROGRAM", "ccanvas");
+        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        for k in [
+            "LC_TERMINAL",
+            "LC_TERMINAL_VERSION",
+            "ITERM_SESSION_ID",
+            "KITTY_WINDOW_ID",
+            "KITTY_PID",
+            "KITTY_PUBLIC_KEY",
+            "GHOSTTY_BIN_DIR",
+            "GHOSTTY_RESOURCES_DIR",
+            "GHOSTTY_SHELL_FEATURES",
+            "WEZTERM_PANE",
+            "WEZTERM_EXECUTABLE",
+        ] {
+            cmd.env_remove(k);
+        }
         if std::env::var("LANG").map_or(true, |l| l.is_empty()) {
             let lang = crate::term_profile::system_lang().unwrap_or_else(|| "en_US.UTF-8".into());
             cmd.env("LANG", lang);

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { getUsage, getPlanUsage, type Usage, type PlanUsage, type PlanLimit } from '../lib/backend'
+import { useStore, selectActive } from '../store/workspace'
+import { watchTranscriptSummary } from '../lib/transcript'
+import { sessionCost, fmtUsd, fmtTokenCount, type ModelTokens, type SessionCost } from '../lib/cost'
 
 // local token-estimate budget (tokens), used only when Claude's real usage isn't
 // available. 0 = no bar, just show usage + reset.
@@ -43,6 +46,34 @@ const PLAN_NOTE: Record<Exclude<PlanUsage['status'], 'ok'>, string> = {
   error: "Couldn't reach Claude for plan usage. Showing the local estimate.",
 }
 
+/** Estimated API-price cost of the agents and desktop mirrors on the active
+ *  canvas. Only watched while the popover is open. */
+function useCanvasCost(on: boolean): { cost: SessionCost | null; sessions: number } {
+  const sessions = useStore((s) => {
+    const keys = new Set<string>()
+    for (const e of selectActive(s).elements)
+      if (e.type === 'widget' && (e.kind === 'agent' || e.mirrorOf === 'desktop') && e.cwd && e.sessionId)
+        keys.add(`${e.cwd}\n${e.sessionId}`)
+    return [...keys].sort().join('\t')
+  })
+  const [rows, setRows] = useState<Record<string, ModelTokens[]>>({})
+  useEffect(() => {
+    if (!on || !sessions) return
+    const offs = sessions.split('\t').map((key) => {
+      const [cwd, id] = key.split('\n')
+      return watchTranscriptSummary(cwd, id, (s) =>
+        setRows((r) => (r[key] === s?.tokens ? r : { ...r, [key]: s?.tokens ?? [] })),
+      )
+    })
+    return () => {
+      offs.forEach((f) => f())
+      setRows({})
+    }
+  }, [on, sessions])
+  const all = Object.values(rows)
+  return { cost: sessionCost(all.flat()), sessions: all.filter((r) => r.length).length }
+}
+
 export function UsagePill() {
   const [u, setU] = useState<Usage | null>(null)
   const [plan, setPlan] = useState<PlanUsage | null>(null)
@@ -50,6 +81,7 @@ export function UsagePill() {
   const [limit, setLimit] = useState<number>(() => Number(localStorage.getItem(LIMIT_KEY)) || 0)
   const [, tick] = useState(0) // re-render to refresh the countdown
   const ref = useRef<HTMLDivElement>(null)
+  const canvas = useCanvasCost(open)
 
   useEffect(() => {
     let alive = true
@@ -168,6 +200,25 @@ export function UsagePill() {
               <div className="usage__row">
                 <span>Tokens last 24h</span>
                 <b>{fmtTokens(u.dayTokens)}</b>
+              </div>
+            </>
+          )}
+
+          {canvas.cost && (
+            <>
+              <div className="usage__sep" />
+              <div
+                className="usage__row"
+                title="What these sessions' tokens would cost at Claude API list prices. Subagents that keep their own log aren't counted."
+              >
+                <span>
+                  This canvas · {canvas.sessions} session{canvas.sessions === 1 ? '' : 's'}
+                </span>
+                <b>≈{fmtUsd(canvas.cost.usd)}</b>
+              </div>
+              <div className="usage__hint">
+                {fmtTokenCount(canvas.cost.tokens)} tokens by its agents and desktop mirrors, priced at API
+                rates{canvas.cost.unpriced.length ? ` (no price for ${canvas.cost.unpriced.join(', ')})` : ''}.
               </div>
             </>
           )}

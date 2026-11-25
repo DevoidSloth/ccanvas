@@ -3,9 +3,9 @@
 //
 // Start with:  npm run server   (or `npm start` for server + web)
 //
-// Provides, all on ws/http://127.0.0.1:7531:
+// Provides, on ws/http://127.0.0.1:7531:
 //   • WebSocket  — a real shell per terminal widget (node-pty)
-//   • GET  /health      — liveness probe
+//   • GET  /health      — liveness probe (+ the session token, app origins only)
 //   • GET  /default-dir — the user's home directory
 //   • GET  /pick-dir    — native "choose folder" dialog → { path }
 //   • GET  /pick-file   — native "open .ccnvs" dialog   → { path, content }
@@ -15,18 +15,84 @@
 //   • POST /save        — write a file  { path, content }
 //   • GET  /code-serve?dir= — start/reuse `code serve-web` for a folder
 //
+// and, on http://127.0.0.1:7532 (a separate origin, see below):
+//   • GET  /proxy?url=  — fetch a page with its framing headers stripped
+//
 // The canvas needs real folders/paths (for terminal cwd + where .ccnvs
 // lives) which a browser sandbox can't provide — so this process does it.
+//
+// Access control. This server can run programs and read/write any file, so
+// only the ccanvas app may use it — not other websites open in the browser,
+// and not pages shown in the web widget:
+//   • Requests that carry an Origin must come from an app origin (the Vite dev
+//     server or the desktop webview; extend with CCANVAS_ORIGINS=a,b).
+//   • Every route except /health needs the per-launch token, sent as the
+//     X-Ccanvas-Token header or a `token` query param (for <video src> and the
+//     WebSocket, which can't set headers). The app learns it from /health,
+//     which only hands it to app origins. This covers requests that carry no
+//     Origin at all (<img>/<video> tags, top-level navigations).
+//   • The Host header must be our own loopback address (stops DNS rebinding).
+//   • /proxy lives on its own port, so a proxied page runs on an origin that is
+//     neither an app origin nor this API's.
 // ============================================================
 import os from 'node:os'
 import http from 'node:http'
 import net from 'node:net'
 import nodePath from 'node:path'
+import crypto from 'node:crypto'
 import { promises as fs, createReadStream } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 
 const PORT = 7531
+const PROXY_PORT = 7532
 const HOST = '127.0.0.1'
+
+// The origins the app itself runs on: Vite dev/preview (see vite.config.ts)
+// and the Tauri webview (tauri://localhost on macOS/Linux, http(s)://tauri.localhost
+// on Windows).
+// This server only backs the browser build, which runs on the Vite ports, so
+// those stay trusted: something else listening there is already a program
+// running on this machine.
+const APP_ORIGINS = new Set([
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+  'http://127.0.0.1:4173',
+  'http://localhost:4173',
+  'tauri://localhost',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+  ...(process.env.CCANVAS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/, ''))
+    .filter(Boolean),
+])
+
+// Fresh each launch; never written to disk or logged.
+const TOKEN = crypto.randomBytes(32).toString('hex')
+
+function tokenOk(given) {
+  if (typeof given !== 'string' || given.length !== TOKEN.length) return false
+  return crypto.timingSafeEqual(Buffer.from(given), Buffer.from(TOKEN))
+}
+
+// Host must name us by a loopback address. A DNS-rebound name (evil.test
+// resolving to 127.0.0.1) would otherwise make its page same-origin with us.
+function hostOk(req, port) {
+  const host = String(req.headers.host || '').toLowerCase()
+  return host === `127.0.0.1:${port}` || host === `localhost:${port}` || host === `[::1]:${port}`
+}
+
+const isAppOrigin = (origin) => typeof origin === 'string' && APP_ORIGINS.has(origin)
+
+// Why a request to the API is refused, or null if it may proceed.
+function refusal(req, url) {
+  if (!hostOk(req, PORT)) return [403, 'bad host']
+  const origin = req.headers.origin
+  if (origin !== undefined && !isAppOrigin(origin)) return [403, 'origin not allowed']
+  if (req.method === 'OPTIONS' || url.pathname === '/health') return null
+  if (!tokenOk(req.headers['x-ccanvas-token'] ?? url.searchParams.get('token'))) return [401, 'bad token']
+  return null
+}
 
 let pty
 let WebSocketServer
@@ -47,6 +113,20 @@ const defaultShell =
     : process.env.CCANVAS_SHELL || process.env.SHELL || 'bash'
 
 const homeDir = process.env.HOME || process.env.USERPROFILE || process.cwd()
+
+// The shell's environment: ours, naming the terminal it really runs in (as
+// spawn_session in src-tauri/src/pty.rs does), without the identity of a
+// terminal this server was started from.
+const OUTER_TERMINAL = ['LC_TERMINAL', 'LC_TERMINAL_VERSION', 'ITERM_SESSION_ID', 'KITTY_WINDOW_ID', 'KITTY_PID', 'KITTY_PUBLIC_KEY', 'GHOSTTY_BIN_DIR', 'GHOSTTY_RESOURCES_DIR', 'GHOSTTY_SHELL_FEATURES', 'WEZTERM_PANE', 'WEZTERM_EXECUTABLE']
+function shellEnv() {
+  const env = { ...process.env }
+  if (process.platform !== 'win32') {
+    for (const k of OUTER_TERMINAL) delete env[k]
+    Object.assign(env, { TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'ccanvas' })
+    delete env.TERM_PROGRAM_VERSION
+  }
+  return env
+}
 
 // ffmpeg/ffprobe let us transcode any codec the webview can't decode into a
 // browser-playable stream. Detected once at startup (overridable via env).
@@ -158,13 +238,18 @@ async function revealInManager(p) {
 
 // ---------- http backend ----------
 
+// CORS for app origins only (set once per request; writeHead merges it in).
+function allowApp(req, res) {
+  res.setHeader('Vary', 'Origin')
+  const origin = req.headers.origin
+  if (!isAppOrigin(origin)) return
+  res.setHeader('Access-Control-Allow-Origin', origin)
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Ccanvas-Token')
+}
+
 function send(res, code, obj) {
-  res.writeHead(code, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  })
+  res.writeHead(code, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(obj))
 }
 
@@ -295,7 +380,6 @@ async function streamFile(req, res, p) {
   const type = mediaType(p)
   const range = req.headers.range
   const baseHeaders = {
-    'Access-Control-Allow-Origin': '*',
     'Content-Type': type,
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-cache',
@@ -466,7 +550,6 @@ function transcodeFile(req, res, p, start) {
   }
   res.writeHead(200, {
     'Content-Type': 'video/mp4',
-    'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'no-cache',
   })
   child.stdout.pipe(res)
@@ -634,19 +717,24 @@ process.on('exit', () => codeServers.forEach(killServer))
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0))
 
 const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost')
+  // CORS first (app origins only), so the app can read a 401 and re-fetch the
+  // token after a backend restart
+  allowApp(req, res)
+  const refused = refusal(req, url)
+  if (refused) return send(res, refused[0], { error: refused[1] })
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    })
+    res.writeHead(204)
     return res.end()
   }
-  const url = new URL(req.url, 'http://localhost')
   try {
     switch (url.pathname) {
-      case '/health':
-        return send(res, 200, { ok: true, platform: process.platform, home: homeDir, ffmpeg: hasFfmpeg })
+      case '/health': {
+        const health = { ok: true, platform: process.platform, ffmpeg: hasFfmpeg }
+        // only a page on an app origin gets the token (and the home dir)
+        if (isAppOrigin(req.headers.origin)) Object.assign(health, { home: homeDir, token: TOKEN })
+        return send(res, 200, health)
+      }
       case '/default-dir':
         return send(res, 200, { path: homeDir })
       case '/usage':
@@ -726,39 +814,6 @@ const server = http.createServer(async (req, res) => {
           )
         return send(res, 200, { entries })
       }
-      case '/proxy': {
-        // Fetch a URL server-side and strip framing protections so the web
-        // widget can embed sites that send X-Frame-Options / CSP frame-ancestors.
-        const target = url.searchParams.get('url')
-        if (!target) return send(res, 400, { error: 'missing url' })
-        try {
-          const upstream = await fetch(target, {
-            headers: { 'user-agent': req.headers['user-agent'] || 'ccanvas' },
-            redirect: 'follow',
-          })
-          const ct = upstream.headers.get('content-type') || 'text/html; charset=utf-8'
-          const buf = Buffer.from(await upstream.arrayBuffer())
-          const headers = {
-            'Content-Type': ct,
-            'Access-Control-Allow-Origin': '*',
-          }
-          if (ct.includes('text/html')) {
-            let html = buf.toString('utf8')
-            // a <base> makes relative + root-relative asset URLs resolve upstream
-            if (!/<base\s/i.test(html)) {
-              html = /<head[^>]*>/i.test(html)
-                ? html.replace(/<head([^>]*)>/i, `<head$1><base href="${target}">`)
-                : `<base href="${target}">` + html
-            }
-            res.writeHead(upstream.status, headers)
-            return res.end(html)
-          }
-          res.writeHead(upstream.status, headers)
-          return res.end(buf)
-        } catch (err) {
-          return send(res, 502, { error: String(err?.message ?? err) })
-        }
-      }
       case '/run': {
         if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
         const { program, args, cwd } = JSON.parse(await readBody(req))
@@ -812,9 +867,84 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-// ---------- terminal bridge (WebSocket on the same server) ----------
+// ---------- web widget proxy (its own port = its own origin) ----------
+// Fetch a URL server-side and strip framing protections so the web widget can
+// embed sites that send X-Frame-Options / CSP frame-ancestors. The page's own
+// scripts run on http://127.0.0.1:7532, which the API above refuses, so a
+// proxied site can't reach the shell, file or command routes. Nothing but
+// /proxy is served here, and it sends no CORS headers.
 
-const wss = new WebSocketServer({ server })
+/** Is `target` (an http(s) URL) on this machine or a private network, by its
+ *  host as written? */
+function localTarget(target) {
+  let host
+  try {
+    host = new URL(target).hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  } catch {
+    return true
+  }
+  if (host === 'localhost' || host.endsWith('.localhost')) return true
+  if (net.isIPv4(host)) {
+    const [a, b] = host.split('.').map(Number)
+    return a === 127 || a === 10 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b < 128) || a >= 224
+  }
+  if (net.isIPv6(host)) {
+    if (host.startsWith('::ffff:')) return localTarget(`http://${host.slice(7)}/`) || !net.isIPv4(host.slice(7))
+    return host === '::1' || host === '::' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host)
+  }
+  return false
+}
+
+const proxyServer = http.createServer(async (req, res) => {
+  if (!hostOk(req, PROXY_PORT)) return send(res, 403, { error: 'bad host' })
+  const url = new URL(req.url, 'http://localhost')
+  if (url.pathname !== '/proxy' || req.method !== 'GET') return send(res, 404, { error: 'not found' })
+  const target = url.searchParams.get('url')
+  if (!target || !/^https?:\/\//i.test(target)) return send(res, 400, { error: 'need an http(s) url' })
+  // a proxied page can read what this returns, so never fetch this machine or
+  // the local network for it (local dev servers are framed directly anyway)
+  if (localTarget(target)) return send(res, 400, { error: 'refusing a local address' })
+  try {
+    const upstream = await fetch(target, {
+      headers: { 'user-agent': req.headers['user-agent'] || 'ccanvas' },
+      redirect: 'follow',
+    })
+    const ct = upstream.headers.get('content-type') || 'text/html; charset=utf-8'
+    const buf = Buffer.from(await upstream.arrayBuffer())
+    const headers = { 'Content-Type': ct }
+    if (ct.includes('text/html')) {
+      let html = buf.toString('utf8')
+      // a <base> makes relative + root-relative asset URLs resolve upstream
+      if (!/<base\s/i.test(html)) {
+        html = /<head[^>]*>/i.test(html)
+          ? html.replace(/<head([^>]*)>/i, `<head$1><base href="${target}">`)
+          : `<base href="${target}">` + html
+      }
+      res.writeHead(upstream.status, headers)
+      return res.end(html)
+    }
+    res.writeHead(upstream.status, headers)
+    return res.end(buf)
+  } catch (err) {
+    return send(res, 502, { error: String(err?.message ?? err) })
+  }
+})
+
+// ---------- terminal bridge (WebSocket on the same server) ----------
+// Same checks as the HTTP routes, before the upgrade: browsers let any page
+// open a WebSocket to any host (no CORS), so without this any site could get
+// a shell.
+
+const wss = new WebSocketServer({ noServer: true })
+
+server.on('upgrade', (req, socket, head) => {
+  const refused = refusal(req, new URL(req.url, 'http://localhost'))
+  if (refused) {
+    socket.end(`HTTP/1.1 ${refused[0]} ${http.STATUS_CODES[refused[0]]}\r\nConnection: close\r\n\r\n`)
+    return
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+})
 
 wss.on('connection', (socket, req) => {
   const url = new URL(req.url, 'http://localhost')
@@ -829,7 +959,7 @@ wss.on('connection', (socket, req) => {
       cols,
       rows,
       cwd: reqCwd || homeDir,
-      env: process.env,
+      env: shellEnv(),
     })
   } catch (err) {
     socket.send(`\r\n\x1b[31mfailed to spawn ${defaultShell}: ${err?.message}\x1b[0m\r\n`)
@@ -876,8 +1006,10 @@ wss.on('connection', (socket, req) => {
 server.listen(PORT, HOST, () => {
   console.log('\x1b[38;2;217;120;90m✦ ccanvas backend\x1b[0m')
   console.log(`  listening  ws + http://${HOST}:${PORT}`)
+  console.log(`  proxy      http://${HOST}:${PROXY_PORT}`)
   console.log(`  shell      ${defaultShell}`)
   console.log(`  home       ${homeDir}`)
   console.log(`  host       ${os.hostname()} (${process.platform})`)
   console.log('  ready — open a terminal widget in ccanvas.\n')
 })
+proxyServer.listen(PROXY_PORT, HOST)

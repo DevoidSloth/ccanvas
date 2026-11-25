@@ -19,7 +19,7 @@ export interface TermProfile {
 }
 
 export const DEFAULT_FONT_FAMILY = "'Spline Sans Mono', ui-monospace, 'SF Mono', Menlo, monospace"
-export const DEFAULT_FONT_SIZE = 12.5
+export const DEFAULT_FONT_SIZE = 13
 
 export const DEFAULT_THEME: ITheme = {
   background: '#1f1e1d',

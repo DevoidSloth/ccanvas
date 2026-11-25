@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore, selectActive, type SidePanel } from '../store/workspace'
-import { baseName, isTauri } from '../lib/backend'
+import { baseName, desktopMirrorsSupported, isTauri } from '../lib/backend'
 import { AGENT_COLORS, type WidgetElement } from '../lib/types'
 import { isTermWidget } from '../lib/view'
 import {
@@ -10,13 +10,26 @@ import {
   IconClose,
   IconSearch,
   IconAgent,
+  IconDesktop,
   IconChat,
   IconHistory,
   IconSettings,
   IconClaude,
   IconPin,
   IconMore,
+  IconLayers,
 } from './icons'
+import {
+  MAX_LAYERS,
+  activeLayerId,
+  findLayer,
+  hasLayers,
+  layerIndex,
+  layerNumber,
+  layerOf,
+  shortPath,
+} from '../lib/layers'
+import { useAgents } from '../lib/agents'
 import { UsagePill } from './UsagePill'
 import { openContextMenu } from './ContextMenu'
 
@@ -30,6 +43,9 @@ export function TopBar() {
   const ws = useStore(selectActive)
   const setActiveDir = useStore((s) => s.setActiveDir)
   const setPaletteOpen = useStore((s) => s.setPaletteOpen)
+  // the folder chip shows the current layer's folder when it has its own
+  const layerDirOwn = hasLayers(ws) ? findLayer(ws, activeLayerId(ws))?.dir : undefined
+  const dir = layerDirOwn ?? ws.dir
 
   return (
     <header
@@ -44,13 +60,20 @@ export function TopBar() {
 
       <div className="topbar__spacer" data-tauri-drag-region />
 
+      <LayerChip />
       <button
-        className={`tb-chip${ws.dir ? '' : ' tb-chip--unset'}`}
-        title={ws.dir ? `Canvas folder: ${ws.dir}\nClick to change` : 'Bind this canvas to a folder'}
+        className={`tb-chip${dir ? '' : ' tb-chip--unset'}`}
+        title={
+          layerDirOwn
+            ? `Layer folder: ${layerDirOwn}\nClick to change`
+            : ws.dir
+              ? `Canvas folder: ${ws.dir}\nClick to change`
+              : 'Bind this canvas to a folder'
+        }
         onClick={() => void setActiveDir()}
       >
         <IconFolder />
-        <span className="tb-chip__name">{ws.dir ? baseName(ws.dir) : 'set folder'}</span>
+        <span className="tb-chip__name">{dir ? baseName(dir) : 'set folder'}</span>
       </button>
 
       <LabelFilter />
@@ -60,6 +83,77 @@ export function TopBar() {
         <IconSearch />
       </button>
     </header>
+  )
+}
+
+// ≡ 02 WEBAPP ~/p/webapp — the layer you're on, shown once a tab has two or
+// more. Click opens the layers overview; right-click to add, rename, or set
+// the layer's folder.
+function LayerChip() {
+  const ws = useStore(selectActive)
+  const [editing, setEditing] = useState(false)
+  // agents on other layers that are waiting on you (amber dot on the chip)
+  const status = useAgents((st) => st.status)
+  if (!hasLayers(ws)) return null
+  const id = activeLayerId(ws)
+  const waitingElsewhere = ws.elements.filter(
+    (e) => e.type === 'widget' && layerOf(e) !== id && status[e.id] === 'waiting',
+  ).length
+  const layer = findLayer(ws, id)!
+  const i = layerIndex(ws, id)
+  const s = () => useStore.getState()
+  const menu = (e: React.MouseEvent) =>
+    openContextMenu(e, [
+      {
+        label: 'New layer…',
+        icon: <IconLayers />,
+        disabled: ws.layers!.length >= MAX_LAYERS,
+        onClick: () => void s().newLayerWithPicker({ activate: true }),
+      },
+      { label: 'Set folder…', icon: <IconFolder />, onClick: () => void s().pickLayerDir(id) },
+      ...(layer.dir
+        ? [{ label: "Use the tab's folder", onClick: () => s().setLayerDir(id, undefined) }]
+        : []),
+      { label: 'Rename…', onClick: () => setEditing(true) },
+      { separator: true as const },
+      { label: 'Layers overview', hint: 'L', onClick: () => s().setLayerOverview(true) },
+    ])
+  return (
+    <button
+      className="tb-layer"
+      title={`Layer ${layerNumber(i)} · ${layer.name}${layer.dir ? `\n${layer.dir}` : ''}\nClick for the layers overview (L, or ⌃⌘↑ from anywhere)`}
+      onClick={() => !editing && s().setLayerOverview(true)}
+      onContextMenu={menu}
+    >
+      <IconLayers />
+      <span className="tb-layer__num">{layerNumber(i)}</span>
+      {editing ? (
+        <input
+          className="tb-layer__input"
+          defaultValue={layer.name}
+          autoFocus
+          onClick={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            s().renameLayer(id, e.target.value)
+            setEditing(false)
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') setEditing(false)
+          }}
+        />
+      ) : (
+        <span className="tb-layer__name">{layer.name}</span>
+      )}
+      {layer.dir && <span className="tb-layer__dir">{"\u200e" + shortPath(layer.dir)}</span>}
+      {waitingElsewhere > 0 && (
+        <span
+          className="tb-layer__led"
+          title={`${waitingElsewhere} agent${waitingElsewhere > 1 ? 's' : ''} on other layers need${waitingElsewhere > 1 ? '' : 's'} you`}
+        />
+      )}
+    </button>
   )
 }
 
@@ -280,13 +374,17 @@ function LabelFilter() {
   )
 }
 
-const PANELS: { id: SidePanel; label: string; title: string; icon: React.ReactNode }[] = [
+const ALL_PANELS: { id: SidePanel; label: string; title: string; icon: React.ReactNode }[] = [
   { id: 'roster', label: 'Agents', title: 'Agents: every agent across your tabs, with status and a composer', icon: <IconAgent /> },
+  { id: 'desktop', label: 'Desktop sessions', title: 'Desktop sessions: mirror chats from the Claude desktop app onto this canvas', icon: <IconDesktop /> },
   { id: 'prompts', label: 'Prompts', title: 'Prompts: saved prompts you can send to any agent', icon: <IconChat /> },
   { id: 'checkpoints', label: 'Checkpoints', title: 'Checkpoints: git snapshots you can roll back to', icon: <IconHistory /> },
   { id: 'memory', label: 'Memory', title: "Memory: Claude's memory for this project, as a linked graph", icon: <IconClaude /> },
   { id: 'settings', label: 'Settings', title: 'Settings: shortcuts and colour palette', icon: <IconSettings /> },
 ]
+// Desktop sessions only where mirroring works: the desktop app on macOS.
+const PANELS = ALL_PANELS.filter((p) => p.id !== 'desktop' || desktopMirrorsSupported())
+const PANELS_TITLE = `Panels: ${PANELS.map((p) => p.label.toLowerCase()).join(', ')}`
 
 // The panel buttons. When the window is narrow the stylesheet hides them and
 // shows a single ⋯ button instead, which lists every panel in a menu.
@@ -330,7 +428,7 @@ function Tools() {
       ))}
       <button
         className={`${on(openPanel !== null)} tb-more`}
-        title="Panels: agents, prompts, checkpoints, memory, settings"
+        title={PANELS_TITLE}
         onClick={moreMenu}
       >
         <IconMore />

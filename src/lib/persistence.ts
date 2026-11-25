@@ -1,6 +1,7 @@
 import type { CcnvsFile, Prompt, Template, Workspace } from './types'
 import { DEFAULT_CAMERA } from './types'
 import { newId } from './id'
+import { activeLayerId, hasLayers, normalizeLayers } from './layers'
 
 const SESSION_KEY = 'ccanvas:session:v1'
 const TEMPLATES_KEY = 'ccanvas:templates:v1'
@@ -13,25 +14,35 @@ const handles = new Map<string, FileSystemFileHandle>()
 export const hasFsAccess = () =>
   typeof (window as any).showOpenFilePicker === 'function'
 
+// A canvas with one layer writes exactly the fields it always has; `layers`
+// and `activeLayer` appear only once there are two or more. Each layer's
+// remembered camera rides along in its entry; `camera` is the active layer's.
 export function toFile(ws: Workspace): CcnvsFile {
-  return {
+  const file: CcnvsFile = {
     format: 'ccnvs',
     version: 1,
     name: ws.name,
     camera: ws.camera,
     elements: ws.elements,
   }
+  if (hasLayers(ws)) {
+    file.layers = ws.layers
+    file.activeLayer = activeLayerId(ws)
+  }
+  return file
 }
 
 export function fromFile(data: CcnvsFile, name: string): Workspace {
-  return {
+  return normalizeLayers({
     id: newId(),
     name: data.name || name,
     elements: Array.isArray(data.elements) ? data.elements : [],
     camera: data.camera ?? { ...DEFAULT_CAMERA },
     createdAt: Date.now(),
     dirty: false,
-  }
+    ...(Array.isArray(data.layers) ? { layers: data.layers } : {}),
+    ...(typeof data.activeLayer === 'string' ? { activeLayerId: data.activeLayer } : {}),
+  })
 }
 
 function serialize(ws: Workspace): string {

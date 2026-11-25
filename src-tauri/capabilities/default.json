@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
-  "windows": [
+  "description": "enables the default permissions for the app's own webview only (not the web widget's native browser view)",
+  "webviews": [
     "main"
   ],
   "permissions": [

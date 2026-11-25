@@ -6,7 +6,14 @@
 // Hand-rolled on std::net so it needs no extra crates. Bound to a random
 // loopback port at startup; the frontend gets the URL via the `media_info`
 // command and points <video> at it (or at the asset protocol for direct play).
+//
+// It can read any file, so only the app may use it: every route sits under a
+// secret path prefix that changes each launch and is only handed out through
+// `media_info` (a page that finds the port can't guess it), the Host header
+// must be our own loopback address (stops DNS rebinding), and CORS is granted
+// to the app's own origins only.
 
+use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
@@ -14,6 +21,44 @@ use std::sync::OnceLock;
 use std::thread;
 
 static PORT: OnceLock<u16> = OnceLock::new();
+
+/// The per-launch secret every route sits under (`/<secret>/file?…`).
+fn secret() -> &'static str {
+    static S: OnceLock<String> = OnceLock::new();
+    S.get_or_init(|| {
+        // std's RandomState is seeded from the OS's random source; two hashes
+        // give 128 random bits without another crate
+        use std::hash::{BuildHasher, Hasher};
+        let word = || {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u64(std::process::id() as u64);
+            h.finish()
+        };
+        format!("{:016x}{:016x}", word(), word())
+    })
+}
+
+/// Origins the app itself runs on: the Tauri webview (macOS/Linux, Windows) and
+/// the Vite dev server.
+fn app_origin(origin: &str) -> bool {
+    matches!(
+        origin,
+        "tauri://localhost"
+            | "http://tauri.localhost"
+            | "https://tauri.localhost"
+            | "http://127.0.0.1:5173"
+            | "http://localhost:5173"
+    )
+}
+
+thread_local! {
+    /// This connection's CORS header line ("" unless the app asked).
+    static CORS: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+fn cors() -> String {
+    CORS.with(|c| c.borrow().clone())
+}
 static HAS_FFMPEG: OnceLock<bool> = OnceLock::new();
 
 fn ffmpeg_bin() -> String {
@@ -44,9 +89,11 @@ pub fn has_ffmpeg() -> bool {
     })
 }
 
-/// Base URL of the embedded server once started, e.g. http://127.0.0.1:52341.
+/// Base URL of the embedded server once started, including the secret prefix,
+/// e.g. http://127.0.0.1:52341/3f…a9.
 pub fn base_url() -> Option<String> {
-    PORT.get().map(|p| format!("http://127.0.0.1:{p}"))
+    PORT.get()
+        .map(|p| format!("http://127.0.0.1:{p}/{}", secret()))
 }
 
 /// Start the server once, on a background thread. Non-fatal on failure.
@@ -88,6 +135,8 @@ fn handle(stream: TcpStream) -> std::io::Result<()> {
 
     // consume headers, capturing Range
     let mut range: Option<String> = None;
+    let mut host = String::new();
+    let mut origin = String::new();
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 {
@@ -98,13 +147,37 @@ fn handle(stream: TcpStream) -> std::io::Result<()> {
             break;
         }
         if let Some((k, v)) = t.split_once(':') {
-            if k.trim().eq_ignore_ascii_case("range") {
+            let k = k.trim();
+            if k.eq_ignore_ascii_case("range") {
                 range = Some(v.trim().to_string());
+            } else if k.eq_ignore_ascii_case("host") {
+                host = v.trim().to_string();
+            } else if k.eq_ignore_ascii_case("origin") {
+                origin = v.trim().to_string();
             }
         }
     }
 
+    let port = PORT.get().copied().unwrap_or(0);
+    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+        return write_simple(&mut writer, 403, "forbidden");
+    }
+    CORS.with(|c| {
+        *c.borrow_mut() = if app_origin(&origin) {
+            format!("Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\n")
+        } else {
+            String::new()
+        }
+    });
     let (path, query) = target.split_once('?').unwrap_or((target.as_str(), ""));
+    // everything lives under the secret prefix; anything else doesn't exist
+    let Some(path) = path
+        .strip_prefix('/')
+        .and_then(|p| p.strip_prefix(secret()))
+        .filter(|p| p.starts_with('/'))
+    else {
+        return write_simple(&mut writer, 404, "not found");
+    };
     match path {
         "/health" => write_json(&mut writer, "{\"ok\":true}"),
         "/file" => serve_file(&mut writer, query, range.as_deref()),
@@ -121,6 +194,7 @@ fn reason(code: u16) -> &'static str {
         200 => "OK",
         206 => "Partial Content",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
         500 => "Internal Server Error",
         501 => "Not Implemented",
@@ -131,9 +205,10 @@ fn reason(code: u16) -> &'static str {
 fn write_simple(w: &mut TcpStream, code: u16, msg: &str) -> std::io::Result<()> {
     let body = msg.as_bytes();
     let head = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: text/plain\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {} {}\r\nContent-Type: text/plain\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
         code,
         reason(code),
+        cors(),
         body.len()
     );
     w.write_all(head.as_bytes())?;
@@ -143,7 +218,8 @@ fn write_simple(w: &mut TcpStream, code: u16, msg: &str) -> std::io::Result<()> 
 fn write_json(w: &mut TcpStream, json: &str) -> std::io::Result<()> {
     let body = json.as_bytes();
     let head = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        cors(),
         body.len()
     );
     w.write_all(head.as_bytes())?;
@@ -166,7 +242,8 @@ fn serve_file(w: &mut TcpStream, query: &str, range: Option<&str>) -> std::io::R
 
     if total == 0 {
         let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nAccept-Ranges: bytes\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+            cors()
         );
         return w.write_all(head.as_bytes());
     }
@@ -186,7 +263,8 @@ fn serve_file(w: &mut TcpStream, query: &str, range: Option<&str>) -> std::io::R
         head.push_str("HTTP/1.1 200 OK\r\n");
     }
     head.push_str(&format!(
-        "Content-Type: {ctype}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+        "Content-Type: {ctype}\r\nAccept-Ranges: bytes\r\n{}Cache-Control: no-cache\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n",
+        cors()
     ));
     w.write_all(head.as_bytes())?;
 
@@ -447,7 +525,10 @@ fn serve_transcode(w: &mut TcpStream, query: &str) -> std::io::Result<()> {
     };
 
     // unknown-length body: stream until ffmpeg ends, then close the connection
-    let head = "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\n{}Cache-Control: no-cache\r\nConnection: close\r\n\r\n",
+        cors()
+    );
     if w.write_all(head.as_bytes()).is_err() {
         let _ = child.kill();
         let _ = child.wait();
@@ -580,4 +661,51 @@ pub fn media_info() -> serde_json::Value {
         "url": base_url(),
         "ffmpeg": has_ffmpeg(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn get(path: &str, host: Option<&str>, origin: Option<&str>) -> String {
+        start();
+        let port = *PORT.get().unwrap();
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let host = host.map_or(format!("127.0.0.1:{port}"), str::to_string);
+        let origin = origin.map_or(String::new(), |o| format!("Origin: {o}\r\n"));
+        write!(s, "GET {path} HTTP/1.1\r\nHost: {host}\r\n{origin}\r\n").unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out
+    }
+
+    #[test]
+    fn files_need_the_secret_prefix() {
+        let file = std::env::current_dir().unwrap().join("Cargo.toml");
+        let q = format!("/file?path={}", file.display());
+        assert!(get(&q, None, None).starts_with("HTTP/1.1 404"));
+        let ok = get(&format!("/{}{q}", secret()), None, None);
+        assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
+        assert!(ok.contains("[package]"));
+    }
+
+    #[test]
+    fn refuses_other_hosts() {
+        let r = get(
+            &format!("/{}/health", secret()),
+            Some("evil.example:80"),
+            None,
+        );
+        assert!(r.starts_with("HTTP/1.1 403"), "{r}");
+    }
+
+    #[test]
+    fn cors_only_for_the_app() {
+        let path = format!("/{}/health", secret());
+        let app = get(&path, None, Some("tauri://localhost"));
+        assert!(app.contains("Access-Control-Allow-Origin: tauri://localhost"));
+        let other = get(&path, None, Some("https://example.com"));
+        assert!(other.starts_with("HTTP/1.1 200"));
+        assert!(!other.contains("Access-Control-Allow-Origin"));
+    }
 }

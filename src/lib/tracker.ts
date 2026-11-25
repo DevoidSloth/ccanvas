@@ -16,6 +16,7 @@ import { readTranscript, extractToolFiles, type ToolFile } from './transcript'
 import { widgetKindForFile } from './filetypes'
 import { boundsOfMany, clamp } from './geometry'
 import { notify } from './agents'
+import { layerOf } from './layers'
 
 type Session = {
   agentId: string
@@ -82,6 +83,8 @@ function trackArrow(agent: WidgetElement, targetId: string, f: ToolFile): ArrowE
     label: f.mutate ? undefined : 'read',
     z: 0,
     trackOf: agent.id,
+    // satellites orbit on the agent's own layer, whichever layer you're on
+    layer: layerOf(agent),
   }
 }
 
@@ -177,6 +180,7 @@ async function tick() {
       path: abs,
       cwd: agent.cwd,
       trackOf: agent.id,
+      layer: layerOf(agent),
     }
     s.addElements([widget, trackArrow(agent, wid, f)])
     session.openedByPath.set(abs, wid)

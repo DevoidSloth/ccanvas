@@ -58,9 +58,12 @@ async function checkOnce() {
   }
 }
 
-/** Start checking for updates (desktop release builds only). */
+/** Start checking for updates (desktop release builds only). A build made
+ *  with VITE_NO_UPDATE_CHECK=1 never checks, so a local build from a fork or
+ *  branch isn't offered the official release in its place. */
 export function startUpdateChecks() {
   if (!isTauri() || import.meta.env.DEV) return
+  if (import.meta.env.VITE_NO_UPDATE_CHECK === '1') return
   void checkOnce()
   setInterval(() => void checkOnce(), RECHECK_MS)
 }
